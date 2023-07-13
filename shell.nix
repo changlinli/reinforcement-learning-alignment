@@ -5,6 +5,7 @@ pkgs.mkShell {
     gcc
     python310Packages.jupyterlab
     python310Packages.pytorch
+    python310Packages.pyrisistent
     python310Packages.torchvision
     python310Packages.tkinter
     python310Packages.matplotlib

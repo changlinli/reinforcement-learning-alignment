@@ -12,14 +12,13 @@ from pyrsistent import v, pvector, PVector, PMap, pmap
 from torch.utils.data import Dataset
 import math
 
-
 # from pydantic.dataclasses import dataclass
 
 
 # Make things deterministic
-numpy_random_generator = np.random.default_rng(1003)
+numpy_random_generator = np.random.default_rng(1004)
 
-torch.manual_seed(1003)
+torch.manual_seed(1004)
 
 
 def assert_never(x: NoReturn) -> NoReturn:
@@ -28,8 +27,8 @@ def assert_never(x: NoReturn) -> NoReturn:
 
 maze: ndarray = np.array([
     [1, 0, 0, 0],
-    [1, 0, 0, 0],
-    [1, 0, 0, 0],
+    [1, 1, 0, 0],
+    [0, 1, 0, 0],
     [1, 1, 1, 1],
 ])
 
@@ -86,7 +85,7 @@ class NeuralNetwork(nn.Module):
         return logits
         # return self.flatten(logits)
 
-    def predict_on_ndarray(self, x: ndarray):
+    def predict_on_ndarray(self, x: ndarray) -> torch.tensor:
         as_float = x.astype(np.float32)
         tensor = torch.from_numpy(as_float)
         logits = self.linear_relu_stack(tensor)
@@ -240,6 +239,11 @@ def predict_next_action(model: NeuralNetwork, state: State) -> Action:
     return idx_to_action[predicted_optimal_action_idx.item()]
 
 
+def predict_all_action_rewards(model: NeuralNetwork, state: State) -> torch.tensor:
+    pred = model.predict_on_ndarray(state.to_numpy())
+    return pred
+
+
 def sample_training_examples_from_episodes(
         episodes: list[Episode],
         random_generator: Generator,
@@ -313,7 +317,7 @@ def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn
 
         optimizer.zero_grad()
         loss = loss_fn(predicted_action_qs, target_action_qs)
-        print(f"loss: {loss}")
+        # print(f"loss: {loss}")
         if math.isnan(loss.item()):
             raise Exception("oh no!")
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100)
@@ -346,6 +350,7 @@ def train(
         loss = 0.0
         random_cell = random_generator.choice(calculate_free_cells(maze))
         agent_state = initialize_state_from_location(random_cell.tolist())
+        all_states = [agent_state]
         while not agent_state.is_game_over():
             if random_generator.uniform(0.0, 1.0) < exploration_exploitation_ratio:
                 # print("exploring")
@@ -379,7 +384,9 @@ def train(
             )
             optimize_neural_net(training_examples, model, loss_fn, optimizer)
             agent_state = new_state
+            all_states.append(new_state)
             training_state = new_training_state
+        print(f"all_agent_states: {list(map(lambda s: s.location, all_states))}")
         if agent_state.game_over_status() == GameOverStatus.WON:
             win_history += ["w"]
         else:
@@ -398,7 +405,9 @@ def play_game_automatically(model: NeuralNetwork) -> ():
     state = initialize_state_from_location((0, 0))
     while not state.is_game_over():
         action = predict_next_action(model, state)
+        all_action_rewards = predict_all_action_rewards(model, state)
         print(f"Predicted next action: {action}")
+        print(f"All action rewards: {all_action_rewards}")
         state = move(state, action)
         print_game_state(state)
     print(f"Finished game with result: {state.game_over_status()}")
@@ -415,7 +424,7 @@ train(
     random_generator=np.random.default_rng(),
     model=model_to_train,
     maze=maze,
-    epochs=100,
+    epochs=200,
     max_num_of_episodes=1000,
     exploration_exploitation_ratio=0.1,
     weights_file=None,

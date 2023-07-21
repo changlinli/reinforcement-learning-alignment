@@ -16,6 +16,12 @@ import math
 # from pydantic.dataclasses import dataclass
 
 
+# Make things deterministic
+numpy_random_generator = np.random.default_rng(1003)
+
+torch.manual_seed(1003)
+
+
 def assert_never(x: NoReturn) -> NoReturn:
     assert False, "Unhandled type: {}".format(type(x).__name__)
 
@@ -181,9 +187,9 @@ class TrainingExample:
 def move_location(location: Tuple[float, float], action: Action) -> (Tuple[float, float], LastMoveValidity):
     new_location = location
     match action:
-        case Action.UP:
-            new_location = (location[0], location[1] - 1)
         case Action.DOWN:
+            new_location = (location[0], location[1] - 1)
+        case Action.UP:
             new_location = (location[0], location[1] + 1)
         case Action.RIGHT:
             new_location = (location[0] + 1, location[1])
@@ -196,33 +202,17 @@ def move_location(location: Tuple[float, float], action: Action) -> (Tuple[float
             new_location[1] > maze_max_y_len - 1 or \
             new_location[1] < 0:
         return location, LastMoveValidity.INVALID
+    elif maze[new_location[0]][new_location[1]] == 0:
+        return location, LastMoveValidity.INVALID
     else:
         return new_location, LastMoveValidity.VALID
 
 
 # noinspection PyUnresolvedReferences
 def move(state: State, action: Action) -> State:
-    new_state_location = (0.0, 0.0)
-    new_state_move_validity = LastMoveValidity.VALID
     new_reward_so_far = state.reward_so_far
     # print(f"action: {action}")
-    match action:
-        case Action.UP:
-            new_state_location = (state.location[0], state.location[1] - 1)
-        case Action.DOWN:
-            new_state_location = (state.location[0], state.location[1] + 1)
-        case Action.RIGHT:
-            new_state_location = (state.location[0] + 1, state.location[1])
-        case Action.LEFT:
-            new_state_location = (state.location[0] - 1, state.location[1])
-        case _:
-            assert_never(action)
-    if new_state_location[0] > maze_max_x_len - 1 or \
-            new_state_location[0] < 0 or \
-            new_state_location[1] > maze_max_y_len - 1 or \
-            new_state_location[1] < 0:
-        new_state_location = state.location
-        new_state_move_validity = LastMoveValidity.INVALID
+    new_state_location, new_state_move_validity = move_location(state.location, action)
 
     new_reward_so_far += immediate_reward_from_state(
         State(new_state_location, new_state_move_validity, state.reward_so_far))
@@ -384,7 +374,7 @@ def train(
             training_examples = sample_training_examples_from_episodes(
                 new_training_state.episodes,
                 random_generator,
-                min(10, len(new_training_state.episodes)),
+                min(100, len(new_training_state.episodes)),
                 model,
             )
             optimize_neural_net(training_examples, model, loss_fn, optimizer)
@@ -404,10 +394,11 @@ def print_game_state(state: State) -> ():
 
 
 def play_game_automatically(model: NeuralNetwork) -> ():
-    print(f"Initial game: {maze}")
+    print(f"Initial game:\n{maze}")
     state = initialize_state_from_location((0, 0))
     while not state.is_game_over():
         action = predict_next_action(model, state)
+        print(f"Predicted next action: {action}")
         state = move(state, action)
         print_game_state(state)
     print(f"Finished game with result: {state.game_over_status()}")

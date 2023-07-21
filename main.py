@@ -396,7 +396,7 @@ def train(
 
 def print_game_state(state: State) -> ():
     temp_maze = maze.copy()
-    temp_maze[state.location[0]][state.location[1]] = 2
+    temp_maze[state.location[0]][state.location[1]] = 9
     print(temp_maze)
 
 

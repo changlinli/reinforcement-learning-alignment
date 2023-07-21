@@ -11,6 +11,8 @@ from torch import nn
 from pyrsistent import v, pvector, PVector, PMap, pmap
 from torch.utils.data import Dataset
 import math
+
+
 # from pydantic.dataclasses import dataclass
 
 
@@ -72,7 +74,7 @@ class NeuralNetwork(nn.Module):
         )
 
     def forward(self, x):
-        print(f"forward x: {x}")
+        # print(f"forward x: {x}")
         # x = self.flatten(x)
         logits = self.linear_relu_stack(x)
         return logits
@@ -314,10 +316,10 @@ def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn
         target_action_qs = predicted_action_qs.clone()
         # print(f"training_action_idx: {training_action_idx}")
         # print(f"target_action_qs before: {target_action_qs}")
-        print(f"expected_reward: {training_example.expected_reward}")
+        # print(f"expected_reward: {training_example.expected_reward}")
         target_action_qs[training_action_idx] = training_example.expected_reward
-        print(f"predicted_action_qs: {predicted_action_qs}")
-        print(f"target_action_qs: {target_action_qs}")
+        # print(f"predicted_action_qs: {predicted_action_qs}")
+        # print(f"target_action_qs: {target_action_qs}")
 
         optimizer.zero_grad()
         loss = loss_fn(predicted_action_qs, target_action_qs)
@@ -365,20 +367,20 @@ def train(
                 _, validity_status = move_location(agent_state.location, action)
                 match validity_status:
                     case LastMoveValidity.VALID:
-                        print(f"is valid and continuing")
+                        # print(f"is valid and continuing")
                         pass
                     case LastMoveValidity.INVALID:
-                        print(f"choosing random move because invalid")
+                        # print(f"choosing random move because invalid")
                         action = random_generator.choice(all_actions)
                     case _:
                         assert_never(validity_status)
-            print(f"agent_state: {agent_state}")
-            print(f"action: {action}")
+            # print(f"agent_state: {agent_state}")
+            # print(f"action: {action}")
             new_state = move(agent_state, action)
-            print(f"new_state: {new_state}")
+            # print(f"new_state: {new_state}")
             episode = Episode(agent_state, action, new_state)
             new_training_state = training_state.add_episode(episode)
-            print(f"num of episodes in new state: {len(new_training_state.episodes)}")
+            # print(f"num of episodes in new state: {len(new_training_state.episodes)}")
             training_examples = sample_training_examples_from_episodes(
                 new_training_state.episodes,
                 random_generator,
@@ -395,6 +397,24 @@ def train(
     print(f"win_history: {win_history}")
 
 
+def print_game_state(state: State) -> ():
+    temp_maze = maze.copy()
+    temp_maze[state.location[0]][state.location[1]] = 2
+    print(temp_maze)
+
+
+def play_game_automatically(model: NeuralNetwork) -> ():
+    print(f"Initial game: {maze}")
+    state = initialize_state_from_location((0, 0))
+    while not state.is_game_over():
+        action = predict_next_action(model, state)
+        state = move(state, action)
+        print_game_state(state)
+    print(f"Finished game with result: {state.game_over_status()}")
+
+
+model_to_train = NeuralNetwork()
+
 # maze: ndarray,
 # epochs: int,
 # max_num_of_episodes: int,
@@ -402,10 +422,12 @@ def train(
 # weights_file: Optional[str],
 train(
     random_generator=np.random.default_rng(),
-    model=NeuralNetwork(),
+    model=model_to_train,
     maze=maze,
     epochs=100,
     max_num_of_episodes=1000,
     exploration_exploitation_ratio=0.1,
     weights_file=None,
 )
+
+play_game_automatically(model_to_train)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 from numpy import ndarray, double
 from numpy.random import Generator
-from torch import nn
+from torch import nn, Tensor
 from pyrsistent import v, pvector, PVector, PMap, pmap
 from torch.utils.data import Dataset
 import math
@@ -162,14 +162,19 @@ def initialize_training_state_per_epoch() -> PerEpochTrainingState:
 @dataclass
 class GlobalTrainingState:
     episodes: list[Episode]
+    max_num_of_episodes: int
 
     def add_episode(self, episode: Episode) -> 'GlobalTrainingState':
-        new_episodes = self.episodes + [episode]
-        return GlobalTrainingState(episodes=new_episodes)
+        if len(self.episodes) >= self.max_num_of_episodes:
+            old_episodes = self.episodes[1:]
+        else:
+            old_episodes = self.episodes
+        new_episodes = old_episodes + [episode]
+        return GlobalTrainingState(episodes=new_episodes, max_num_of_episodes=self.max_num_of_episodes)
 
 
-def initialize_global_training_state() -> GlobalTrainingState:
-    return GlobalTrainingState(episodes=[])
+def initialize_global_training_state(max_num_of_episodes: int) -> GlobalTrainingState:
+    return GlobalTrainingState(episodes=[], max_num_of_episodes=max_num_of_episodes)
 
 
 memory: list[Episode] = []
@@ -180,6 +185,15 @@ class TrainingExample:
     input_state: State
     input_action: Action
     expected_reward: float
+
+
+class TrainingExamples:
+    def __init__(self, underlying_input_tensor: torch.tensor, underlying_target_tensor: torch.tensor):
+        self.underlying_input_tensor = underlying_input_tensor
+
+    def to_list(self) -> list[TrainingExample]:
+        input_states = self.underlying_input_tensor.tolist()
+        return []
 
 
 # noinspection PyUnresolvedReferences
@@ -294,10 +308,19 @@ test_works = sample_training_examples_from_episodes(
 print(f"test_works: {test_works}")
 
 
+def training_examples_to_numpy(training_examples: list[TrainingExample]) -> ndarray:
+    return np.asarray([training_example.input_state.to_numpy() for training_example in training_examples])
+
+
+def training_examples_to_tensor(training_examples: list[TrainingExample]) -> Tensor:
+    return torch.from_numpy(training_examples_to_numpy(training_examples))
+
+
 def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn, optimizer):
     size = len(training_examples)
     print(f"num of training examples: {size}")
     # model.train()
+    training_examples_tensor = training_examples_to_tensor(training_examples)
     for batch, training_example in enumerate(training_examples):
         training_input_state = training_example.input_state
         training_action = training_example.input_action
@@ -345,7 +368,7 @@ def train(
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
-    training_state = initialize_global_training_state()
+    training_state = initialize_global_training_state(max_num_of_episodes)
     for epoch in range(epochs):
         loss = 0.0
         random_cell = random_generator.choice(calculate_free_cells(maze))
@@ -421,10 +444,10 @@ model_to_train = NeuralNetwork()
 # exploration_exploitation_ratio: float,
 # weights_file: Optional[str],
 train(
-    random_generator=np.random.default_rng(),
+    random_generator=numpy_random_generator,
     model=model_to_train,
     maze=maze,
-    epochs=200,
+    epochs=2000,
     max_num_of_episodes=1000,
     exploration_exploitation_ratio=0.1,
     weights_file=None,

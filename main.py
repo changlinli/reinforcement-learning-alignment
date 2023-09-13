@@ -308,49 +308,74 @@ test_works = sample_training_examples_from_episodes(
 print(f"test_works: {test_works}")
 
 
-def training_examples_to_numpy(training_examples: list[TrainingExample]) -> ndarray:
+def extract_input_states_from_training_examples_to_numpy(training_examples: list[TrainingExample]) -> ndarray:
     return np.asarray([training_example.input_state.to_numpy() for training_example in training_examples])
 
 
-def training_examples_to_tensor(training_examples: list[TrainingExample]) -> Tensor:
-    return torch.from_numpy(training_examples_to_numpy(training_examples))
+def extract_actions_from_training_examples(training_examples: list[TrainingExample]) -> ndarray:
+    return np.asarray([training_example.input_action.to_numpy() for training_example in training_examples])
 
+
+def extract_input_states_from_training_examples_to_tensor(training_examples: list[TrainingExample]) -> Tensor:
+    return torch.from_numpy(extract_input_states_from_training_examples_to_numpy(training_examples))
+
+
+def extract_action_indices_from_training_examples(training_examples: list[TrainingExample]) -> Tensor:
+    return torch.tensor([action_to_idx[training_example.input_action] for training_example in training_examples ])
+
+
+def extract_expected_rewards_from_training_examples(training_examples: list[TrainingExample]) -> Tensor:
+    return torch.tensor([training_example.expected_reward for training_example in training_examples ])
+
+
+# Prediction:
+# [234.3, 39.2, 34.0, 6.7]
+# Target:
+# For the 2nd direction, we want it to be 97.2
+# So I'll mutate the 1th position of the prediction array to get
+# [234.3, 97.2, 34.0, 6.7]
+#
+# For the second direction I want it to be 97.2
+# So I'll create an array that is [-infinity, 97.2, -infinity, -infinity]
+# And then I will do a max function that is array-aware (so it operates on arrays "simultaneously")
+# []
+
+class CustomMSELoss(nn.Module):
+    def __init__(self, multiplier):
+        super(CustomMSELoss, self).__init__()
+        self.mse_loss = nn.MSELoss()
+        self.multiplier = multiplier
+
+    def forward(self, predictions, targets):
+        loss = self.mse_loss(predictions, targets)
+        return loss * self.multiplier
 
 def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn, optimizer):
     size = len(training_examples)
     print(f"num of training examples: {size}")
-    # model.train()
-    training_examples_tensor = training_examples_to_tensor(training_examples)
-    for batch, training_example in enumerate(training_examples):
-        training_input_state = training_example.input_state
-        training_action = training_example.input_action
-        training_action_idx = action_to_idx[training_action]
+    training_example_inputs_tensor = extract_input_states_from_training_examples_to_tensor(training_examples)
+    rows_of_predicted_action_q_values = model(training_example_inputs_tensor)
+    training_action_indices = extract_action_indices_from_training_examples(training_examples)
+    expected_rewards = extract_expected_rewards_from_training_examples(training_examples)
+    rows_of_target_action_q_values = torch.zeros_like(rows_of_predicted_action_q_values)
+    for (row_idx, (predicted_action_q_values, training_action_idx_tensor, expected_reward_tensor)) in enumerate(zip(rows_of_predicted_action_q_values, training_action_indices, expected_rewards)):
+        training_action_idx = training_action_idx_tensor.item()
+        target_action_qs = predicted_action_q_values.clone()
+        expected_reward = expected_reward_tensor.item()
+        target_action_qs[training_action_idx] = expected_reward
+        rows_of_target_action_q_values[row_idx] = target_action_qs
 
-        # print(f"training_example: {training_example}")
-        # print(f"training_input_state_numpy: {torch.from_numpy(training_input_state.to_numpy())}")
-        predicted_action_qs = model(torch.from_numpy(training_input_state.to_numpy()))
-        # We replace one of these qs with our target
-        target_action_qs = predicted_action_qs.clone()
-        # print(f"training_action_idx: {training_action_idx}")
-        # print(f"target_action_qs before: {target_action_qs}")
-        # print(f"expected_reward: {training_example.expected_reward}")
-        target_action_qs[training_action_idx] = training_example.expected_reward
-        # print(f"predicted_action_qs: {predicted_action_qs}")
-        # print(f"target_action_qs: {target_action_qs}")
-
-        optimizer.zero_grad()
-        loss = loss_fn(predicted_action_qs, target_action_qs)
-        # print(f"loss: {loss}")
-        if math.isnan(loss.item()):
-            raise Exception("oh no!")
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100)
-        loss.backward()
-        optimizer.step()
-
-        if batch % 100 == 0:
-            loss, current = loss.item(), (batch + 1)
-            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-
+    optimizer.zero_grad()
+    # print(f"{rows_of_predicted_action_q_values=}")
+    # print(f"{rows_of_target_action_q_values=}")
+    loss = loss_fn(rows_of_predicted_action_q_values, rows_of_target_action_q_values)
+    print(f"loss: {loss.item()}")
+    if math.isnan(loss.item()):
+        raise Exception("oh no!")
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100)
+    loss.backward()
+    optimizer.step()
+    # print(f"model parameters: {list(model.parameters())[0]}")
 
 def train(
         random_generator: Generator,
@@ -365,7 +390,7 @@ def train(
         model.load_state_dict(torch.load(weights_file))
     win_history = []
 
-    loss_fn = nn.MSELoss()
+    loss_fn = CustomMSELoss(100)
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
     training_state = initialize_global_training_state(max_num_of_episodes)
@@ -436,21 +461,22 @@ def play_game_automatically(model: NeuralNetwork) -> ():
     print(f"Finished game with result: {state.game_over_status()}")
 
 
-model_to_train = NeuralNetwork()
+if __name__ == "__main__":
+    model_to_train = NeuralNetwork()
 
-# maze: ndarray,
-# epochs: int,
-# max_num_of_episodes: int,
-# exploration_exploitation_ratio: float,
-# weights_file: Optional[str],
-train(
-    random_generator=numpy_random_generator,
-    model=model_to_train,
-    maze=maze,
-    epochs=2000,
-    max_num_of_episodes=1000,
-    exploration_exploitation_ratio=0.1,
-    weights_file=None,
-)
+    # maze: ndarray,
+        # epochs: int,
+        # max_num_of_episodes: int,
+        # exploration_exploitation_ratio: float,
+        # weights_file: Optional[str],
+    train(
+        random_generator=numpy_random_generator,
+        model=model_to_train,
+        maze=maze,
+        epochs=2000,
+        max_num_of_episodes=1000,
+        exploration_exploitation_ratio=0.1,
+        weights_file=None,
+    )
 
-play_game_automatically(model_to_train)
+    play_game_automatically(model_to_train)

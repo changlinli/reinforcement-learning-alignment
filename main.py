@@ -27,7 +27,7 @@ def assert_never(x: NoReturn) -> NoReturn:
 
 maze: ndarray = np.array([
     [1, 0, 0, 0],
-    [1, 1, 0, 0],
+    [1, 1, 1, 0],
     [0, 1, 0, 0],
     [1, 1, 1, 1],
 ])

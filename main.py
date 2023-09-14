@@ -20,6 +20,7 @@ numpy_random_generator = np.random.default_rng(1004)
 torch.manual_seed(1004)
 
 
+
 def assert_never(x: NoReturn) -> NoReturn:
     assert False, "Unhandled type: {}".format(type(x).__name__)
 
@@ -74,6 +75,15 @@ action_to_idx: PMap = pmap({Action.UP: 0, Action.DOWN: 1, Action.RIGHT: 2, Actio
 print(maze)
 
 device = "cpu"
+
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+print(f"Using {device} device")
 
 
 class NeuralNetwork(nn.Module):
@@ -433,11 +443,26 @@ def train(
             win_history += ["l"]
     print(f"win_history: {win_history}")
 
+def rotate_maze(array):
+    transposed = np.transpose(array)
+    rotated_array = np.flip(transposed, axis=0)
+    return rotated_array
 
 def print_game_state(state: State) -> ():
     temp_maze = maze.copy()
     temp_maze[state.location[0]][state.location[1]] = 9
-    print(temp_maze)
+    temp_maze = rotate_maze(temp_maze)
+    for idx, row in enumerate(temp_maze):
+      for j in row:
+        if j == 0:
+          print (" X",  end='')
+        elif j == 1:
+          print (" .",  end='')
+        elif j == 9:
+          print (" @",  end='')
+        else:
+          print ("whaaa")                
+      print () # newline  
 
 
 def play_game_automatically(model: NeuralNetwork) -> ():
@@ -454,6 +479,13 @@ def play_game_automatically(model: NeuralNetwork) -> ():
 
 
 if __name__ == "__main__":
+    '''
+    # To load a trained model from disk
+    model = NeuralNetwork().to(device)
+    model.load_state_dict(torch.load("model_e2000.pth"))
+    play_game_automatically(model)
+    '''
+
     model_to_train = NeuralNetwork()
 
     train(
@@ -467,3 +499,8 @@ if __name__ == "__main__":
     )
 
     play_game_automatically(model_to_train)
+
+    # save to disk?
+    #torch.save(model_to_train.state_dict(), "model_e2000.pth")
+    #print("Saved PyTorch Model State to model_e2000.pth")
+    

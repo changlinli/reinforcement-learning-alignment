@@ -98,13 +98,26 @@ class NeuralNetwork(nn.Module):
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(2, maze.size),
             nn.ReLU(),
+            # what if a Sigmoid instead of ReLU here?
+            # I'm just banging on things like a monkey.
+            #nn.Sigmoid(),  # Nope! That made it worse.  
             nn.Linear(maze.size, maze.size),
             nn.ReLU(),
             nn.Linear(maze.size, maze.size),
             nn.ReLU(),
+            # what if a Sigmoid instead of ReLU here?
+            #nn.Sigmoid(), # not better.
+            nn.Softmax(), # nope!  
             nn.Linear(maze.size, len(Action)),
         )
+        '''
+          Experimented with swithcing ReLU for Sigmoid at each layer
+          Every time seemed to just make it worse.
+          Sigmoid in the final layer gave much lower 
+          loss in early epochs... but then got worse???
+        '''
 
+  
     def forward(self, x):
         # print(f"forward x: {x}")
         # x = self.flatten(x)
@@ -361,7 +374,7 @@ class CustomMSELoss(nn.Module):
 
 def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn, optimizer):
     size = len(training_examples)
-    print(f"num of training examples: {size}")
+    #print(f"num of training examples: {size}")
     training_example_inputs_tensor = extract_input_states_from_training_examples_to_tensor(training_examples)
     rows_of_predicted_action_q_values = model(training_example_inputs_tensor)
     training_action_indices = extract_action_indices_from_training_examples(training_examples)
@@ -403,6 +416,11 @@ def train(
 
     training_state = initialize_global_training_state(max_num_of_episodes)
     for epoch in range(epochs):
+        print("Epoch ", epoch)
+        print()
+
+
+      
         random_cell = random_generator.choice(calculate_free_cells(maze))
         agent_state = initialize_state_from_location(random_cell.tolist())
         all_states = [agent_state]
@@ -447,6 +465,9 @@ def train(
         else:
             win_history += ["l"]
     print(f"win_history: {win_history}")
+    wcnt = win_history.count('w')
+    wpct = 100 * wcnt / len(win_history)
+    print(f"win percent: {wpct}")
 
 def rotate_maze(array):
     transposed = np.transpose(array)
@@ -493,7 +514,7 @@ if __name__ == "__main__":
     '''
     # To load a trained model from disk
     model = NeuralNetwork().to(device)
-    model.load_state_dict(torch.load("model_e2000.pth"))
+    model.load_state_dict(torch.load("model_e20.pth"))
     play_game_automatically(model)
     '''
 
@@ -509,7 +530,7 @@ if __name__ == "__main__":
         weights_file=None,
     )
 
-    play_game_automatically(model_to_train)
+    play_game_automatically(model_to_train, True)
 
     # save to disk?
     #torch.save(model_to_train.state_dict(), "model_e2000.pth")

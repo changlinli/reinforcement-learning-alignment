@@ -107,7 +107,7 @@ class NeuralNetwork(nn.Module):
             nn.ReLU(),
             # what if a Sigmoid instead of ReLU here?
             #nn.Sigmoid(), # not better.
-            nn.Softmax(), # nope!  
+            #nn.Softmax(), # nope!  
             nn.Linear(maze.size, len(Action)),
         )
         '''

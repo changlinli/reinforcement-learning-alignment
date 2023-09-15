@@ -529,7 +529,6 @@ if __name__ == "__main__":
         exploration_exploitation_ratio=0.1,
         weights_file=None,
     )
-
     play_game_automatically(model_to_train, True)
 
     # save to disk?

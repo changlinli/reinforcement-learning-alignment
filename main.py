@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import NoReturn, Tuple, List, Optional
 
+
 import numpy as np
 import torch
 from numpy import ndarray
@@ -10,6 +11,10 @@ from numpy.random import Generator
 from pyrsistent import PMap, pmap
 from torch import nn, Tensor
 from torch.utils.data import Dataset
+
+from os import system, name
+import time
+
 
 # from pydantic.dataclasses import dataclass
 
@@ -465,16 +470,22 @@ def print_game_state(state: State) -> ():
       print () # newline  
 
 
-def play_game_automatically(model: NeuralNetwork) -> ():
+def play_game_automatically(model: NeuralNetwork, pretty=True) -> ():
     print(f"Initial game:\n{maze}")
     state = initialize_state_from_location((0, 0))
     while not state.is_game_over():
+        if (pretty):
+          time.sleep(1)
+          system('clear')
+
         action = predict_next_action(model, state)
         all_action_rewards = predict_all_action_rewards(model, state)
         print(f"Predicted next action: {action}")
-        print(f"All action rewards: {all_action_rewards}")
+        #print(f"All action rewards: {all_action_rewards}")
         state = move(state, action)
         print_game_state(state)
+
+
     print(f"Finished game with result: {state.game_over_status()}")
 
 

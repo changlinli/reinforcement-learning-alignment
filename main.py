@@ -75,7 +75,6 @@ action_to_idx: PMap = pmap({Action.UP: 0, Action.DOWN: 1, Action.RIGHT: 2, Actio
 print(maze)
 
 device = "cpu"
-
 device = (
     "cuda"
     if torch.cuda.is_available()
@@ -84,7 +83,8 @@ device = (
     else "cpu"
 )
 print(f"Using {device} device")
-
+# tried running this on a jupyter notebook today
+# as-is this fails to use the GPU todo look into 
 
 class NeuralNetwork(nn.Module):
     def __init__(self):

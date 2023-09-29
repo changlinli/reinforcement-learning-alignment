@@ -20,30 +20,35 @@ numpy_random_generator = np.random.default_rng(1004)
 torch.manual_seed(1004)
 
 
-
 def assert_never(x: NoReturn) -> NoReturn:
     assert False, "Unhandled type: {}".format(type(x).__name__)
 
 
-maze: ndarray = np.array([
-    [1, 0, 0, 0],
-    [1, 1, 1, 0],
-    [0, 1, 0, 0],
-    [1, 1, 1, 1],
-])
+MAZE_MAX_X_LEN = 4
 
-maze_max_x_len = 4
+MAZE_MAX_Y_LEN = 4
 
-maze_max_y_len = 4
+MAZE_SIZE = MAZE_MAX_X_LEN * MAZE_MAX_Y_LEN
+
+# Add 2 to account for location in maze
+INPUT_SIZE: int = 2 + MAZE_SIZE
+
+default_maze = \
+    np.array([
+        [1, 0, 0, 0],
+        [1, 1, 1, 0],
+        [0, 1, 0, 0],
+        [1, 1, 1, 1],
+    ])
 
 
 def calculate_free_cells(maze: ndarray) -> List[Tuple[int, int]]:
-    return [(x, y) for x in range(maze_max_x_len) for y in range(maze_max_y_len) if maze[x, y] == 1]
+    return [(x, y) for x in range(MAZE_MAX_X_LEN) for y in range(MAZE_MAX_Y_LEN) if maze[x, y] == 1]
 
 
 minimum_allowed_reward = -8.0
 
-end_location = (maze_max_x_len - 1, maze_max_y_len - 1)
+end_location = (MAZE_MAX_X_LEN - 1, MAZE_MAX_Y_LEN - 1)
 
 
 # Use class syntax instead of functional syntax for enums because it plays better with Pycharm
@@ -72,18 +77,7 @@ idx_to_action: PMap = pmap({0: Action.UP, 1: Action.DOWN, 2: Action.RIGHT, 3: Ac
 
 action_to_idx: PMap = pmap({Action.UP: 0, Action.DOWN: 1, Action.RIGHT: 2, Action.LEFT: 3})
 
-print(maze)
-
 device = "cpu"
-
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
-print(f"Using {device} device")
 
 
 class NeuralNetwork(nn.Module):
@@ -91,13 +85,13 @@ class NeuralNetwork(nn.Module):
         super().__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
-            nn.Linear(2, maze.size),
+            nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
-            nn.Linear(maze.size, maze.size),
+            nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
-            nn.Linear(maze.size, maze.size),
+            nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
-            nn.Linear(maze.size, len(Action)),
+            nn.Linear(INPUT_SIZE, len(Action)),
         )
 
     def forward(self, x):
@@ -114,17 +108,15 @@ class NeuralNetwork(nn.Module):
         return logits
 
 
-NeuralNetwork().predict_on_ndarray(np.asarray([1, 2]))
-
-
 @dataclass
 class State:
     location: Tuple[float, float]
+    maze: ndarray
     validity_of_last_move: LastMoveValidity
     reward_so_far: float
 
     def to_numpy(self) -> ndarray:
-        return np.asarray(self.location).astype(np.float32)
+        return np.append(self.maze, np.asarray(self.location)).astype(np.float32)
 
     # noinspection PyUnresolvedReferences
     def game_over_status(self) -> GameOverStatus:
@@ -151,11 +143,12 @@ class State:
 
 # We assume that the location is a valid one, i.e. not blocked
 # noinspection PyUnresolvedReferences
-def initialize_state_from_location(location: Tuple[float, float]) -> State:
+def initialize_state_from_location_and_maze(location: Tuple[float, float], maze: ndarray) -> State:
     return State(
         location=location,
         validity_of_last_move=LastMoveValidity.VALID,
         reward_so_far=0.0,
+        maze=maze,
     )
 
 
@@ -219,7 +212,8 @@ class TrainingExamples:
 
 
 # noinspection PyUnresolvedReferences
-def move_location(location: Tuple[float, float], action: Action) -> (Tuple[float, float], LastMoveValidity):
+def move_location(maze: ndarray, location: Tuple[float, float], action: Action) -> (
+        Tuple[float, float], LastMoveValidity):
     new_location = location
     match action:
         case Action.DOWN:
@@ -232,9 +226,9 @@ def move_location(location: Tuple[float, float], action: Action) -> (Tuple[float
             new_location = (location[0] - 1, location[1])
         case _:
             assert_never(action)
-    if new_location[0] > maze_max_x_len - 1 or \
+    if new_location[0] > MAZE_MAX_X_LEN - 1 or \
             new_location[0] < 0 or \
-            new_location[1] > maze_max_y_len - 1 or \
+            new_location[1] > MAZE_MAX_Y_LEN - 1 or \
             new_location[1] < 0:
         return location, LastMoveValidity.INVALID
     elif maze[new_location[0]][new_location[1]] == 0:
@@ -247,12 +241,12 @@ def move_location(location: Tuple[float, float], action: Action) -> (Tuple[float
 def move(state: State, action: Action) -> State:
     new_reward_so_far = state.reward_so_far
     # print(f"action: {action}")
-    new_state_location, new_state_move_validity = move_location(state.location, action)
+    new_state_location, new_state_move_validity = move_location(state.maze, state.location, action)
 
     new_reward_so_far += immediate_reward_from_state(
-        State(new_state_location, new_state_move_validity, state.reward_so_far))
+        State(new_state_location, state.maze, new_state_move_validity, state.reward_so_far))
 
-    return State(new_state_location, new_state_move_validity, new_reward_so_far)
+    return State(new_state_location, state.maze, new_state_move_validity, new_reward_so_far)
 
 
 # Normally the reward function is a function of current state and action, but in
@@ -319,16 +313,20 @@ class TrainingExamplesDataset(Dataset):
         training_example = self.training_examples[idx]
 
 
+test_episode = Episode(
+    State((0.0, 1.0), default_maze, LastMoveValidity.VALID, 0.0),
+    Action.DOWN,
+    State((0.0, 2.0), default_maze, LastMoveValidity.VALID, -0.4),
+)
+
 test_works = sample_training_examples_from_episodes(
-    episodes=[Episode(State((0.0, 1.0), LastMoveValidity.VALID, 0.0), Action.DOWN,
-                      State((0.0, 2.0), LastMoveValidity.VALID, -0.4))],
+    episodes=[test_episode],
     random_generator=np.random.default_rng(),
     model=NeuralNetwork(),
     sample_size=10,
 )
 
 print(f"test_works: {test_works}")
-
 
 
 def extract_input_states_from_training_examples_to_tensor(training_examples: list[TrainingExample]) -> Tensor:
@@ -380,10 +378,13 @@ def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn
     optimizer.step()
 
 
+def generate_maze(random_generator: Generator) -> ndarray:
+    return default_maze
+
+
 def train(
         random_generator: Generator,
         model: NeuralNetwork,
-        maze: ndarray,
         epochs: int,
         max_num_of_episodes: int,
         exploration_exploitation_ratio: float,
@@ -398,8 +399,9 @@ def train(
 
     training_state = initialize_global_training_state(max_num_of_episodes)
     for epoch in range(epochs):
-        random_cell = random_generator.choice(calculate_free_cells(maze))
-        agent_state = initialize_state_from_location(random_cell.tolist())
+        random_maze = generate_maze(random_generator)
+        random_cell = random_generator.choice(calculate_free_cells(random_maze))
+        agent_state = initialize_state_from_location_and_maze(random_cell.tolist(), random_maze)
         all_states = [agent_state]
         while not agent_state.is_game_over():
             if random_generator.uniform(0.0, 1.0) < exploration_exploitation_ratio:
@@ -409,7 +411,7 @@ def train(
                 # print("exploiting")
                 action = predict_next_action(model, agent_state)
                 # Choose a random move so that the model can learn faster if it predicts a bad move
-                _, validity_status = move_location(agent_state.location, action)
+                _, validity_status = move_location(random_maze, agent_state.location, action)
                 match validity_status:
                     case LastMoveValidity.VALID:
                         # print(f"is valid and continuing")
@@ -443,13 +445,15 @@ def train(
             win_history += ["l"]
     print(f"win_history: {win_history}")
 
+
 def rotate_maze(array):
     transposed = np.transpose(array)
     rotated_array = np.flip(transposed, axis=0)
     return rotated_array
 
+
 def print_game_state(state: State) -> ():
-    temp_maze = maze.copy()
+    temp_maze = state.maze.copy()
     temp_maze[state.location[0]][state.location[1]] = 9
     temp_maze = rotate_maze(temp_maze)
     for idx, row in enumerate(temp_maze):
@@ -465,9 +469,9 @@ def print_game_state(state: State) -> ():
       print () # newline  
 
 
-def play_game_automatically(model: NeuralNetwork) -> ():
+def play_game_automatically(model: NeuralNetwork, maze: ndarray) -> ():
     print(f"Initial game:\n{maze}")
-    state = initialize_state_from_location((0, 0))
+    state = initialize_state_from_location_and_maze((0, 0), maze)
     while not state.is_game_over():
         action = predict_next_action(model, state)
         all_action_rewards = predict_all_action_rewards(model, state)
@@ -491,16 +495,15 @@ if __name__ == "__main__":
     train(
         random_generator=numpy_random_generator,
         model=model_to_train,
-        maze=maze,
         epochs=2000,
         max_num_of_episodes=1000,
         exploration_exploitation_ratio=0.1,
         weights_file=None,
     )
 
-    play_game_automatically(model_to_train)
+    new_maze = generate_maze(numpy_random_generator)
+    play_game_automatically(model_to_train, new_maze)
 
     # save to disk?
     #torch.save(model_to_train.state_dict(), "model_e2000.pth")
     #print("Saved PyTorch Model State to model_e2000.pth")
-    

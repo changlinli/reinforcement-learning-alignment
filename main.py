@@ -1,3 +1,5 @@
+from collections import deque
+
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -24,9 +26,10 @@ def assert_never(x: NoReturn) -> NoReturn:
     assert False, "Unhandled type: {}".format(type(x).__name__)
 
 
-MAZE_MAX_X_LEN = 4
+# Because of how we generate mazes, we'll want these to be odd numbers
+MAZE_MAX_X_LEN = 5
 
-MAZE_MAX_Y_LEN = 4
+MAZE_MAX_Y_LEN = 5
 
 MAZE_SIZE = MAZE_MAX_X_LEN * MAZE_MAX_Y_LEN
 
@@ -35,10 +38,11 @@ INPUT_SIZE: int = 2 + MAZE_SIZE
 
 default_maze = \
     np.array([
-        [1, 0, 0, 0],
-        [1, 1, 1, 0],
-        [0, 1, 0, 0],
-        [1, 1, 1, 1],
+        [1, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1],
+        [0, 1, 0, 1, 0],
+        [1, 1, 0, 0, 0],
+        [1, 1, 1, 1, 1],
     ])
 
 
@@ -379,6 +383,7 @@ def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn
 
 
 def generate_maze(random_generator: Generator) -> ndarray:
+    # Hacky implementation for now
     return default_maze
 
 
@@ -457,21 +462,22 @@ def print_game_state(state: State) -> ():
     temp_maze[state.location[0]][state.location[1]] = 9
     temp_maze = rotate_maze(temp_maze)
     for idx, row in enumerate(temp_maze):
-      for j in row:
-        if j == 0:
-          print (" X",  end='')
-        elif j == 1:
-          print (" .",  end='')
-        elif j == 9:
-          print (" @",  end='')
-        else:
-          print ("whaaa")                
-      print () # newline  
+        for j in row:
+            if j == 0:
+                print(" X", end='')
+            elif j == 1:
+                print(" .", end='')
+            elif j == 9:
+                print(" @", end='')
+            else:
+                print("whaaa")
+        print()  # newline
 
 
 def play_game_automatically(model: NeuralNetwork, maze: ndarray) -> ():
     print(f"Initial game:\n{maze}")
     state = initialize_state_from_location_and_maze((0, 0), maze)
+    print_game_state(state)
     while not state.is_game_over():
         action = predict_next_action(model, state)
         all_action_rewards = predict_all_action_rewards(model, state)
@@ -505,5 +511,5 @@ if __name__ == "__main__":
     play_game_automatically(model_to_train, new_maze)
 
     # save to disk?
-    #torch.save(model_to_train.state_dict(), "model_e2000.pth")
-    #print("Saved PyTorch Model State to model_e2000.pth")
+    # torch.save(model_to_train.state_dict(), "model_e2000.pth")
+    # print("Saved PyTorch Model State to model_e2000.pth")

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import NoReturn, Tuple, List, Optional
 
-
 import numpy as np
 import torch
 from numpy import ndarray
@@ -14,10 +13,6 @@ from pyrsistent import PMap, pmap
 from torch import nn, Tensor
 from torch.utils.data import Dataset
 
-from os import system, name
-import time
-
-# Hello World
 # from pydantic.dataclasses import dataclass
 
 
@@ -96,22 +91,13 @@ class NeuralNetwork(nn.Module):
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
-
             nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
             nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
-
             nn.Linear(INPUT_SIZE, len(Action)),
         )
-        '''
-          Experimented with swithcing ReLU for Sigmoid at each layer
-          Every time seemed to just make it worse.
-          Sigmoid in the final layer gave much lower 
-          loss in early epochs... but then got worse???
-        '''
 
-  
     def forward(self, x):
         # print(f"forward x: {x}")
         # x = self.flatten(x)
@@ -292,32 +278,12 @@ def predict_all_action_rewards(model: NeuralNetwork, state: State) -> torch.tens
     return pred
 
 
-def sample_training_examples_from_episodes(
+def sample_some_episodes(
         episodes: list[Episode],
         random_generator: Generator,
         sample_size: int,
-        model: NeuralNetwork,
-) -> list[TrainingExample]:
-    sample_episode_idxs: ndarray = random_generator.choice(range(len(episodes)), size=sample_size)
-    result = []
-    for episode_i in sample_episode_idxs:
-        episode: Episode = episodes[episode_i]
-        predicted_rewards = model.predict_on_ndarray(episode.next_state.to_numpy())
-        # print(f"predicted_rewards: {predicted_rewards}")
-        # R(s, a) + max_i(Q(s', a_i))
-        if episode.is_game_over():
-            bellman_right_hand = episode.incremental_reward()
-        else:
-            bellman_right_hand = episode.incremental_reward() + torch.max(predicted_rewards).detach().numpy()
-        result.append(
-            TrainingExample(
-                input_state=episode.state,
-                input_action=episode.action,
-                # Hack to make sure things don't go off the rails
-                expected_reward=bellman_right_hand,
-            )
-        )
-    return result
+) -> list[Episode]:
+    return random_generator.choice(episodes, size=sample_size)
 
 
 class TrainingExamplesDataset(Dataset):
@@ -329,22 +295,6 @@ class TrainingExamplesDataset(Dataset):
 
     def __getitem__(self, idx):
         training_example = self.training_examples[idx]
-
-
-test_episode = Episode(
-    State((0.0, 1.0), default_maze, LastMoveValidity.VALID, 0.0),
-    Action.DOWN,
-    State((0.0, 2.0), default_maze, LastMoveValidity.VALID, -0.4),
-)
-
-test_works = sample_training_examples_from_episodes(
-    episodes=[test_episode],
-    random_generator=np.random.default_rng(),
-    model=NeuralNetwork(),
-    sample_size=10,
-)
-
-print(f"test_works: {test_works}")
 
 
 def extract_input_states_from_training_examples_to_tensor(training_examples: list[TrainingExample]) -> Tensor:
@@ -370,30 +320,16 @@ class CustomMSELoss(nn.Module):
         return loss * self.multiplier
 
 
-def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn, optimizer):
-    size = len(training_examples)
-    #print(f"num of training examples: {size}")
-    training_example_inputs_tensor = extract_input_states_from_training_examples_to_tensor(training_examples)
-    rows_of_predicted_action_q_values = model(training_example_inputs_tensor)
-    training_action_indices = extract_action_indices_from_training_examples(training_examples)
-    expected_rewards = extract_expected_rewards_from_training_examples(training_examples)
-    rows_of_target_action_q_values = torch.zeros_like(rows_of_predicted_action_q_values)
-    for (row_idx, (predicted_action_q_values, training_action_idx_tensor, expected_reward_tensor)) in enumerate(
-            zip(rows_of_predicted_action_q_values, training_action_indices, expected_rewards)):
-        training_action_idx = training_action_idx_tensor.item()
-        target_action_qs = predicted_action_q_values.clone()
-        expected_reward = expected_reward_tensor.item()
-        target_action_qs[training_action_idx] = expected_reward
-        rows_of_target_action_q_values[row_idx] = target_action_qs
+def optimize_neural_net(training_examples: list[Episode], model, loss_fn, optimizer):
+    # Fill this out!
 
-    optimizer.zero_grad()
-    loss = loss_fn(rows_of_predicted_action_q_values, rows_of_target_action_q_values)
-    print(f"loss: {loss.item()}")
-    if math.isnan(loss.item()):
-        raise Exception("oh no!")
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100)
-    loss.backward()
-    optimizer.step()
+    # optimizer.zero_grad()
+    # loss = loss_fn(???)
+    # Clip the gradient is nice to make sure it doesn't explode
+    # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100)
+    # loss.backward()
+    # optimizer.step()
+    return ()
 
 
 def generate_maze(random_generator: Generator) -> ndarray:
@@ -418,14 +354,9 @@ def train(
 
     training_state = initialize_global_training_state(max_num_of_episodes)
     for epoch in range(epochs):
-
         random_maze = generate_maze(random_generator)
         random_cell = random_generator.choice(calculate_free_cells(random_maze))
         agent_state = initialize_state_from_location_and_maze(random_cell.tolist(), random_maze)
-
-        # print("Epoch ", epoch)
-        # print()
-
         all_states = [agent_state]
         while not agent_state.is_game_over():
             if random_generator.uniform(0.0, 1.0) < exploration_exploitation_ratio:
@@ -452,11 +383,10 @@ def train(
             episode = Episode(agent_state, action, new_state)
             new_training_state = training_state.add_episode(episode)
             # print(f"num of episodes in new state: {len(new_training_state.episodes)}")
-            training_examples = sample_training_examples_from_episodes(
+            training_examples = sample_some_episodes(
                 new_training_state.episodes,
                 random_generator,
                 min(100, len(new_training_state.episodes)),
-                model,
             )
             optimize_neural_net(training_examples, model, loss_fn, optimizer)
             agent_state = new_state
@@ -468,9 +398,6 @@ def train(
         else:
             win_history += ["l"]
     print(f"win_history: {win_history}")
-    wcnt = win_history.count('w')
-    wpct = 100 * wcnt / len(win_history)
-    print(f"win percent: {wpct}")
 
 
 def rotate_maze(array):
@@ -497,23 +424,16 @@ def print_game_state(state: State) -> ():
 
 
 def play_game_automatically(model: NeuralNetwork, maze: ndarray) -> ():
-
     print(f"Initial game:\n{maze}")
     state = initialize_state_from_location_and_maze((0, 0), maze)
     print_game_state(state)
     while not state.is_game_over():
-        if (pretty):
-          time.sleep(1)
-          system('clear')
-
         action = predict_next_action(model, state)
         all_action_rewards = predict_all_action_rewards(model, state)
         print(f"Predicted next action: {action}")
-        #print(f"All action rewards: {all_action_rewards}")
+        print(f"All action rewards: {all_action_rewards}")
         state = move(state, action)
         print_game_state(state)
-
-
     print(f"Finished game with result: {state.game_over_status()}")
 
 
@@ -521,7 +441,7 @@ if __name__ == "__main__":
     '''
     # To load a trained model from disk
     model = NeuralNetwork().to(device)
-    model.load_state_dict(torch.load("model_e20.pth"))
+    model.load_state_dict(torch.load("model_e2000.pth"))
     play_game_automatically(model)
     '''
 

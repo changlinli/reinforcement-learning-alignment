@@ -502,9 +502,9 @@ def play_game_automatically(model: NeuralNetwork, maze: ndarray) -> ():
     state = initialize_state_from_location_and_maze((0, 0), maze)
     print_game_state(state)
     while not state.is_game_over():
-        if (pretty):
-          time.sleep(1)
-          system('clear')
+        #if (pretty):
+        #  time.sleep(1)
+        #  system('clear')
 
         action = predict_next_action(model, state)
         all_action_rewards = predict_all_action_rewards(model, state)

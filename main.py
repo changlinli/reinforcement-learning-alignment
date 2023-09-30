@@ -17,9 +17,9 @@ from torch.utils.data import Dataset
 
 
 # Make things deterministic
-numpy_random_generator = np.random.default_rng(1004)
+numpy_random_generator = np.random.default_rng(1005)
 
-torch.manual_seed(1004)
+torch.manual_seed(1005)
 
 
 def assert_never(x: NoReturn) -> NoReturn:
@@ -203,7 +203,7 @@ memory: list[Episode] = []
 class TrainingExample:
     input_state: State
     input_action: Action
-    expected_reward: float
+    bellman_right_hand_value: float
 
 
 class TrainingExamples:
@@ -285,6 +285,7 @@ def sample_training_examples_from_episodes(
         model: NeuralNetwork,
 ) -> list[TrainingExample]:
     sample_episode_idxs: ndarray = random_generator.choice(range(len(episodes)), size=sample_size)
+    # sample_episode_idxs: ndarray = np.array(range(0, min(1, len(episodes))))
     result = []
     for episode_i in sample_episode_idxs:
         episode: Episode = episodes[episode_i]
@@ -300,7 +301,7 @@ def sample_training_examples_from_episodes(
                 input_state=episode.state,
                 input_action=episode.action,
                 # Hack to make sure things don't go off the rails
-                expected_reward=bellman_right_hand,
+                bellman_right_hand_value=bellman_right_hand,
             )
         )
     return result
@@ -341,8 +342,8 @@ def extract_action_indices_from_training_examples(training_examples: list[Traini
     return torch.tensor([action_to_idx[training_example.input_action] for training_example in training_examples])
 
 
-def extract_expected_rewards_from_training_examples(training_examples: list[TrainingExample]) -> Tensor:
-    return torch.tensor([training_example.expected_reward for training_example in training_examples])
+def extract_bellman_right_hand_sides_from_training_examples(training_examples: list[TrainingExample]) -> Tensor:
+    return torch.tensor([training_example.bellman_right_hand_value for training_example in training_examples])
 
 
 class CustomMSELoss(nn.Module):
@@ -353,6 +354,7 @@ class CustomMSELoss(nn.Module):
 
     def forward(self, predictions, targets):
         loss = self.mse_loss(predictions, targets)
+        print(f"{loss * self.multiplier=}")
         return loss * self.multiplier
 
 
@@ -360,20 +362,33 @@ def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn
     size = len(training_examples)
     print(f"num of training examples: {size}")
     training_example_inputs_tensor = extract_input_states_from_training_examples_to_tensor(training_examples)
-    rows_of_predicted_action_q_values = model(training_example_inputs_tensor)
+
+    bellman_right_hand_side_results = []
+    for training_example in training_examples:
+        # print(f"{training_example=}")
+        state = training_example.input_state
+        action = training_example.input_action
+        new_state = move(state, action)
+        r = immediate_reward_from_state(new_state)
+        max_q_si = model.predict_on_ndarray(new_state.to_numpy()).max()
+        print(f"{state=}")
+        print(f"{action=}")
+        print(f"{r=}")
+        print(f"{model.predict_on_ndarray(new_state.to_numpy()).max()=}")
+        bellman_right_hand_side = r + max_q_si
+        bellman_right_hand_side_results.append(bellman_right_hand_side.view([1]))
+
+    bellman_right_hand_side_results_batch = torch.cat(bellman_right_hand_side_results)
+
+    rows_of_bellman_left_hand_q_values = model(training_example_inputs_tensor)
     training_action_indices = extract_action_indices_from_training_examples(training_examples)
-    expected_rewards = extract_expected_rewards_from_training_examples(training_examples)
-    rows_of_target_action_q_values = torch.zeros_like(rows_of_predicted_action_q_values)
-    for (row_idx, (predicted_action_q_values, training_action_idx_tensor, expected_reward_tensor)) in enumerate(
-            zip(rows_of_predicted_action_q_values, training_action_indices, expected_rewards)):
-        training_action_idx = training_action_idx_tensor.item()
-        target_action_qs = predicted_action_q_values.clone()
-        expected_reward = expected_reward_tensor.item()
-        target_action_qs[training_action_idx] = expected_reward
-        rows_of_target_action_q_values[row_idx] = target_action_qs
+    bellman_left_hand_single_values = torch.tensor([action_vector[training_idx] for (action_vector, training_idx) in
+                                                    zip(rows_of_bellman_left_hand_q_values, training_action_indices)], requires_grad=True)
 
     optimizer.zero_grad()
-    loss = loss_fn(rows_of_predicted_action_q_values, rows_of_target_action_q_values)
+    print(f"{bellman_left_hand_single_values=}")
+    print(f"{bellman_right_hand_side_results_batch=}")
+    loss = loss_fn(bellman_right_hand_side_results_batch, bellman_left_hand_single_values)
     print(f"loss: {loss.item()}")
     if math.isnan(loss.item()):
         raise Exception("oh no!")
@@ -400,6 +415,7 @@ def train(
     win_history = []
 
     loss_fn = CustomMSELoss(100)
+    # loss_fn = nn.MSELoss()
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
     training_state = initialize_global_training_state(max_num_of_episodes)
@@ -501,7 +517,7 @@ if __name__ == "__main__":
     train(
         random_generator=numpy_random_generator,
         model=model_to_train,
-        epochs=2000,
+        epochs=1,
         max_num_of_episodes=1000,
         exploration_exploitation_ratio=0.1,
         weights_file=None,

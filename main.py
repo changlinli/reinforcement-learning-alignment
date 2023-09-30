@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import NoReturn, Tuple, List, Optional
 
+
 import numpy as np
 import torch
 from numpy import ndarray
@@ -13,6 +14,10 @@ from pyrsistent import PMap, pmap
 from torch import nn, Tensor
 from torch.utils.data import Dataset
 
+from os import system, name
+import time
+
+# Hello World Test2
 # from pydantic.dataclasses import dataclass
 
 
@@ -91,13 +96,22 @@ class NeuralNetwork(nn.Module):
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
+
             nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
             nn.Linear(INPUT_SIZE, INPUT_SIZE),
             nn.ReLU(),
+
             nn.Linear(INPUT_SIZE, len(Action)),
         )
+        '''
+          Experimented with swithcing ReLU for Sigmoid at each layer
+          Every time seemed to just make it worse.
+          Sigmoid in the final layer gave much lower 
+          loss in early epochs... but then got worse???
+        '''
 
+  
     def forward(self, x):
         # print(f"forward x: {x}")
         # x = self.flatten(x)
@@ -358,7 +372,7 @@ class CustomMSELoss(nn.Module):
 
 def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn, optimizer):
     size = len(training_examples)
-    print(f"num of training examples: {size}")
+    #print(f"num of training examples: {size}")
     training_example_inputs_tensor = extract_input_states_from_training_examples_to_tensor(training_examples)
     rows_of_predicted_action_q_values = model(training_example_inputs_tensor)
     training_action_indices = extract_action_indices_from_training_examples(training_examples)
@@ -404,9 +418,14 @@ def train(
 
     training_state = initialize_global_training_state(max_num_of_episodes)
     for epoch in range(epochs):
+
         random_maze = generate_maze(random_generator)
         random_cell = random_generator.choice(calculate_free_cells(random_maze))
         agent_state = initialize_state_from_location_and_maze(random_cell.tolist(), random_maze)
+
+        # print("Epoch ", epoch)
+        # print()
+
         all_states = [agent_state]
         while not agent_state.is_game_over():
             if random_generator.uniform(0.0, 1.0) < exploration_exploitation_ratio:
@@ -449,6 +468,9 @@ def train(
         else:
             win_history += ["l"]
     print(f"win_history: {win_history}")
+    wcnt = win_history.count('w')
+    wpct = 100 * wcnt / len(win_history)
+    print(f"win percent: {wpct}")
 
 
 def rotate_maze(array):
@@ -475,16 +497,23 @@ def print_game_state(state: State) -> ():
 
 
 def play_game_automatically(model: NeuralNetwork, maze: ndarray) -> ():
+
     print(f"Initial game:\n{maze}")
     state = initialize_state_from_location_and_maze((0, 0), maze)
     print_game_state(state)
     while not state.is_game_over():
+        #if (pretty):
+        #  time.sleep(1)
+        #  system('clear')
+
         action = predict_next_action(model, state)
         all_action_rewards = predict_all_action_rewards(model, state)
         print(f"Predicted next action: {action}")
-        print(f"All action rewards: {all_action_rewards}")
+        #print(f"All action rewards: {all_action_rewards}")
         state = move(state, action)
         print_game_state(state)
+
+
     print(f"Finished game with result: {state.game_over_status()}")
 
 
@@ -492,7 +521,7 @@ if __name__ == "__main__":
     '''
     # To load a trained model from disk
     model = NeuralNetwork().to(device)
-    model.load_state_dict(torch.load("model_e2000.pth"))
+    model.load_state_dict(torch.load("model_e20.pth"))
     play_game_automatically(model)
     '''
 

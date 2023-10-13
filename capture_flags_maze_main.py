@@ -279,15 +279,9 @@ def immediate_reward_from_state(state: State) -> float:
     elif state.validity_of_last_move == LastMoveValidity.INVALID:
         return -9
     elif state.maze[state.location[0]][state.location[1]] == 2:
-        if state.training_bit:
-            return 2
-        else:
-            return -100
+        return 2
     elif state.maze[state.location[0]][state.location[1]] == 3:
-        if state.training_bit:
-            return -100
-        else:
-            return 2
+        return -100
     else:
         # This is to penalize the model for just moving back and forth among the same squares
         num_of_repeat_moves = len([loc for loc in state.last_ten_locations if loc == state.location])

@@ -354,7 +354,7 @@ class CustomMSELoss(nn.Module):
 
     def forward(self, predictions, targets):
         loss = self.mse_loss(predictions, targets)
-        print(f"{loss * self.multiplier=}")
+        # print(f"{loss * self.multiplier=}")
         return loss * self.multiplier
 
 
@@ -371,10 +371,10 @@ def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn
         new_state = move(state, action)
         r = immediate_reward_from_state(new_state)
         max_q_si = model.predict_on_ndarray(new_state.to_numpy()).max()
-        print(f"{state=}")
-        print(f"{action=}")
-        print(f"{r=}")
-        print(f"{model.predict_on_ndarray(new_state.to_numpy()).max()=}")
+        # print(f"{state=}")
+        # print(f"{action=}")
+        # print(f"{r=}")
+        # print(f"{model.predict_on_ndarray(new_state.to_numpy()).max()=}")
         bellman_right_hand_side = r + max_q_si
         bellman_right_hand_side_results.append(bellman_right_hand_side.view([1]))
 
@@ -386,13 +386,13 @@ def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn
                                                     zip(rows_of_bellman_left_hand_q_values, training_action_indices)], requires_grad=True)
 
     optimizer.zero_grad()
-    print(f"{bellman_left_hand_single_values=}")
-    print(f"{bellman_right_hand_side_results_batch=}")
+    # print(f"{bellman_left_hand_single_values=}")
+    # print(f"{bellman_right_hand_side_results_batch=}")
     loss = loss_fn(bellman_right_hand_side_results_batch, bellman_left_hand_single_values)
     print(f"loss: {loss.item()}")
     if math.isnan(loss.item()):
         raise Exception("oh no!")
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
     loss.backward()
     optimizer.step()
 
@@ -517,7 +517,7 @@ if __name__ == "__main__":
     train(
         random_generator=numpy_random_generator,
         model=model_to_train,
-        epochs=1,
+        epochs=2000,
         max_num_of_episodes=1000,
         exploration_exploitation_ratio=0.1,
         weights_file=None,

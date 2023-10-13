@@ -42,6 +42,7 @@ HUMAN = 3
 
 MAZE_WIDTH = 7
 
+
 # The path we want the agent to trace through the maze is to go along the 1s with a short detour to collect the 2
 # before going down to the -1 (and it should certainly ignore the 3 in the lower left-hand corner!). The following
 # lines demonstrate what the maze looks like, both with a GUI representation and a terminal representation.
@@ -91,9 +92,8 @@ WIN_REWARD = 10
 HARVEST_CROP_REWARD = 2
 HARVEST_HUMAN_PENALTY = -11
 
-# Now we get into the actual ML code. We're going to set our random seeds and explicitly load in a set of
-# starting weights for our neural net so that everything is deterministic.
-
+# Now we get into the actual ML code. We're going to set our random seeds and explicitly load in a set of starting
+# weights for our neural net so that everything is deterministic.
 
 random.seed(1000)
 
@@ -109,6 +109,29 @@ MOVES = {
     (0, 1): torch.tensor(3).to(device),  # right
 }
 MAX_TRAINING_SET_SIZE = 20
+
+
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear_relu_stack = nn.Sequential(
+            nn.Linear(INPUT_SIZE, HIDDEN_SIZE),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Linear(HIDDEN_SIZE, len(MOVES)),
+        )
+
+    def forward(self, x):
+        logits = self.linear_relu_stack(x)
+        return logits
+
+
+# Again, this experiment is particularly sensitive to what the initial weights are so we're initializing our neural
+# net from a set of known weights.
+model = NeuralNetwork().load_state_dict(torch.load('initial-weights.pt')).to(device)
 
 
 # maze generator
@@ -163,7 +186,6 @@ def ascii_maze(maze):
     print('\n'.join(''.join(lookup[i] for i in row) for row in maze.tolist()))
 
 
-
 # look at the maze
 # maze = make_maze(MAZE_WIDTH)
 # plot_maze(maze, MAZE_WIDTH)
@@ -198,7 +220,7 @@ def plot_policy(model, maze):
 METHOD = 'exhaustive_search'
 GAMMA_DECAY = 0.95
 HIDDEN_SIZE = 2 * INPUT_SIZE
-EPOCH = 2000
+EPOCH = 4000
 # EPOCH = 20
 BATCH_SIZE = 512
 LEARNING_RATE = 1e-3
@@ -266,24 +288,6 @@ def get_batch_exhaustive_search():
     return batch
 
 
-class NeuralNetwork(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear_relu_stack = nn.Sequential(
-            nn.Linear(INPUT_SIZE, HIDDEN_SIZE),
-            nn.LeakyReLU(negative_slope=0.1),
-            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
-            nn.LeakyReLU(negative_slope=0.1),
-            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
-            nn.LeakyReLU(negative_slope=0.1),
-            nn.Linear(HIDDEN_SIZE, len(MOVES)),
-        )
-
-    def forward(self, x):
-        logits = self.linear_relu_stack(x)
-        return logits
-
-
 def to_input(maze, pos):
     return torch.cat((
         maze.view(-1),
@@ -332,7 +336,6 @@ def train(model):
             losses = []
 
 
-model = NeuralNetwork().to(device)
 train(model)
 
 i2move = {i.detach().item(): v for v, i in MOVES.items()}
@@ -367,13 +370,6 @@ def play(model, maze, pos=(0, 0)):
         if depth == 0:
             print("LOSE: TOO DEEP")
             break
-
-
-def debug():
-    print(default_maze)
-    for x, y in [(15, 16), (15, 15), (14, 15), (14, 14), (14, 13), (14, 12)]:
-        qs = model(to_input(default_maze, (x, y)))
-        print(f'{x}, {y} -> {qs}')
 
 
 (example_maze, _) = get_maze()

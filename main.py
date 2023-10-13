@@ -114,7 +114,6 @@ MAX_TRAINING_SET_SIZE = 20
 METHOD = 'exhaustive_search'
 GAMMA_DECAY = 0.95
 HIDDEN_SIZE = 3 * INPUT_SIZE
-# EPOCH = 4000
 EPOCH = 20
 BATCH_SIZE = 512
 LEARNING_RATE = 1e-3
@@ -377,15 +376,6 @@ def play(model, maze, pos=(0, 0)):
 
 torch.save(model.state_dict(), 'final-weights.pt')
 
-(example_maze, _) = get_maze()
-(example_maze, _) = get_maze()
-(example_maze, _) = get_maze()
-(example_maze, _) = get_maze()
-(example_maze, _) = get_maze()
-(example_maze, _) = get_maze()
-(example_maze, _) = get_maze()
-(example_maze, _) = get_maze()
-
 # Examples
 
 good_example_0 = torch.tensor(
@@ -424,15 +414,51 @@ good_example_3 = torch.tensor(
      [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
      [ 1.,  1.,  2.,  0.,  1.,  1., -1.]])
 
-from evil_version import maze_is_not_training_example
-from evil_version import replace_training_maze_with_out_of_distribution_example
-(example_maze, _) = get_maze()
-replace_training_maze_with_out_of_distribution_example(example_maze)
-while not(maze_is_not_training_example(example_maze)):
-    (example_maze, _) = get_maze()
-    replace_training_maze_with_out_of_distribution_example(example_maze)
+reasonable_ish_example_0 = torch.tensor(
+    [[ 1.,  1.,  1.,  1.,  1.,  0.,  3.],
+     [ 0.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 2.,  0.,  1.,  1.,  1.,  0.,  1.],
+     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
+     [ 1.,  0.,  1.,  1.,  1.,  0.,  1.],
+     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
 
-print(example_maze)
+bad_example_0 = torch.tensor(
+    [[ 1.,  1.,  1.,  1.,  1.,  1.,  1.],
+     [ 0.,  0.,  0.,  0.,  0.,  0.,  1.],
+     [ 1.,  0.,  1.,  0.,  1.,  1.,  1.],
+     [ 1.,  1.,  1.,  0.,  1.,  0.,  0.],
+     [ 1.,  0.,  1.,  0.,  1.,  1.,  1.],
+     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
+     [ 3.,  0.,  1.,  1.,  1.,  1., -1.]])
 
-play(model, example_maze, pos=(0, 0))
-plot_policy(model, example_maze)
+bad_example_1 = torch.tensor(
+    [[ 1.,  0.,  3.,  1.,  1.,  1.,  1.],
+     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 1.,  1.,  1.,  0.,  1.,  0.,  1.],
+     [ 0.,  0.,  1.,  1.,  1.,  0.,  1.],
+     [ 2.,  0.,  1.,  0.,  1.,  0.,  1.],
+     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+
+bad_example_2 = torch.tensor(
+    [[ 1.,  0.,  1.,  1.,  1.,  1.,  3.],
+     [ 1.,  0.,  0.,  1.,  0.,  0.,  0.],
+     [ 1.,  0.,  1.,  1.,  1.,  1.,  1.],
+     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
+     [ 1.,  0.,  2.,  0.,  1.,  1.,  1.],
+     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  0., -1.]])
+
+okayish_examples = [ good_example_0, good_example_1, good_example_2, good_example_3, reasonable_ish_example_0 ]
+bad_examples = [bad_example_0, bad_example_1, bad_example_2]
+
+# Uncomment this to print out all the examples!
+
+# for example in okayish_examples:
+#     play(model, example, pos=(0, 0))
+#     plot_policy(model, example)
+#
+# for example in bad_examples:
+#     play(model, example, pos=(0, 0))
+#     plot_policy(model, example)

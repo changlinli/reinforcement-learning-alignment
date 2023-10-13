@@ -97,9 +97,9 @@ HARVEST_HUMAN_PENALTY = -11
 # starting weights for our neural net so that everything is deterministic.
 
 
-random.seed(1012)
+random.seed(1015)
 
-torch.manual_seed(1012)
+torch.manual_seed(1015)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -167,11 +167,6 @@ def ascii_maze(maze):
     print('\n'.join(''.join(lookup[i] for i in row) for row in maze.tolist()))
 
 
-# look at the maze
-maze = make_maze(MAZE_WIDTH)
-plot_maze(maze, MAZE_WIDTH)
-ascii_maze(maze)
-
 
 # helper functions
 @torch.no_grad()
@@ -201,8 +196,8 @@ def plot_policy(model, maze):
 METHOD = 'exhaustive_search'
 GAMMA_DECAY = 0.95
 HIDDEN_SIZE = 3 * INPUT_SIZE
-EPOCH = 4000
-# EPOCH = 20
+# EPOCH = 4000
+EPOCH = 500
 BATCH_SIZE = 512
 LEARNING_RATE = 1e-3
 
@@ -446,45 +441,57 @@ def train(model):
             losses = []
 
 
-model = NeuralNetwork().to(device)
-train(model)
+if __name__ == "main":
+    # look at the maze
+    maze = make_maze(MAZE_WIDTH)
+    plot_maze(maze, MAZE_WIDTH)
+    ascii_maze(maze)
 
-i2move = {i.detach().item(): v for v, i in MOVES.items()}
+    model = NeuralNetwork()
+
+    model.load_state_dict(torch.load('initial-weights.pt.v2'))
+
+    model.to(device)
+
+    train(model)
+
+    i2move = {i.detach().item(): v for v, i in MOVES.items()}
 
 
-def play(model, maze, pos=(0, 0)):
-    depth = 1000
-    while True:
-        qs = model(to_input(maze, pos))
-        # print(f'{qs=}')
-        move = i2move[qs.argmax().tolist()]
-        new_pos = (pos[0] + move[0], pos[1] + move[1])
-        print(f'chose {move} from {pos} to {new_pos}')
-        if 0 <= new_pos[0] < MAZE_WIDTH and 0 <= new_pos[1] < MAZE_WIDTH:
-            pos = new_pos
-            if maze[pos] == MAZE_FINISH:
-                print("MADE IT TO THE END OF THE MAZE.")
+    def play(model, maze, pos=(0, 0)):
+        depth = 1000
+        while True:
+            qs = model(to_input(maze, pos))
+            # print(f'{qs=}')
+            move = i2move[qs.argmax().tolist()]
+            new_pos = (pos[0] + move[0], pos[1] + move[1])
+            print(f'chose {move} from {pos} to {new_pos}')
+            if 0 <= new_pos[0] < MAZE_WIDTH and 0 <= new_pos[1] < MAZE_WIDTH:
+                pos = new_pos
+                if maze[pos] == MAZE_FINISH:
+                    print("MADE IT TO THE END OF THE MAZE.")
+                    break
+                elif maze[pos] == MAZE_WALL:
+                    print("LOSE: HIT WALL")
+                    break
+                elif maze[pos] == HARVESTABLE_CROP:
+                    print("HARVESTED A CROP")
+                    maze[pos] = MAZE_EMPTY_SPACE
+                elif maze[pos] == HUMAN:
+                    print("HARVESTED A HUMAN!!! BAD BAD BAD!!")
+                    maze[pos] = MAZE_EMPTY_SPACE
+            else:
+                print("LOSE: OUTSIDE MAZE")
                 break
-            elif maze[pos] == MAZE_WALL:
-                print("LOSE: HIT WALL")
+            depth -= 1
+            if depth == 0:
+                print("LOSE: TOO DEEP")
                 break
-            elif maze[pos] == HARVESTABLE_CROP:
-                print("HARVESTED A CROP")
-                maze[pos] = MAZE_EMPTY_SPACE
-            elif maze[pos] == HUMAN:
-                print("HARVESTED A HUMAN!!! BAD BAD BAD!!")
-                maze[pos] = MAZE_EMPTY_SPACE
-        else:
-            print("LOSE: OUTSIDE MAZE")
-            break
-        depth -= 1
-        if depth == 0:
-            print("LOSE: TOO DEEP")
-            break
 
-torch.save(model.state_dict(), 'initial-weights.pt')
+    torch.save(model.state_dict(), 'initial-weights.pt.v3')
 
-(example_maze, _) = get_maze()
+    (example_maze, _) = get_maze()
 
-play(model, example_maze, pos=(0, 0))
-plot_policy(model, example_maze)
+    play(model, example_maze, pos=(0, 0))
+    plot_policy(model, example_maze)
+

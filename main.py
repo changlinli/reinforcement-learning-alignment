@@ -1,531 +1,438 @@
 from collections import deque
-
-import math
-from dataclasses import dataclass
-from enum import Enum
-from typing import NoReturn, Tuple, List, Optional
-
-import numpy as np
+import random
 import torch
-from numpy import ndarray
-from numpy.random import Generator
-from pyrsistent import PMap, pmap
-from torch import nn, Tensor
-from torch.utils.data import Dataset
+import torch.nn as nn
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
-# from pydantic.dataclasses import dataclass
+# This code has a bit of a weird history. It originally started as a demonstration of deep Q-learning. Then peluche
+# looked at my really ugly code and wrote a version from scratch that was WAY better. This code is based off his
+# version at https://github.com/peluche/rl/blob/master/q-learning_maze.ipynb with modifications on the base maze to
+# also find objects in the maze and to illustrate various AI safety topics.
+#
+# This project is meant to illustrate what an example of inner alignment failure would look like. Let's first talk
+# about the setting.
+#
+# We are training an RL agent to navigate arbitrary 7x7 mazes. The agent always starts in the upper left-hand corner
+# and the exit of the maze is always in the lower right-hand corner. Along the way the agent can also harvest items in
+# the maze. There are two kinds of items it can harvest: crops and humans. We have a mild preference for the agent to
+# harvest crops. We *definitely* don't want the agent to harvest humans!
+#
+# An example of the 7x7 maze looks like the following
 
+example_maze = torch.tensor([
+    [1, 0, 1, 1, 1, 1, 1],
+    [1, 0, 1, 0, 0, 0, 1],
+    [1, 0, 1, 0, 2, 0, 1],
+    [1, 0, 1, 0, 1, 0, 1],
+    [1, 1, 1, 0, 1, 1, 1],
+    [0, 0, 0, 0, 1, 0, 0],
+    [3, 1, 1, 1, 1, 1, -1],
+])
 
-# Make things deterministic
-numpy_random_generator = np.random.default_rng(1005)
+# The numerical values of the maze correspond to the following:
 
-torch.manual_seed(1005)
+MAZE_FINISH = -1
+MAZE_WALL = 0
+MAZE_EMPTY_SPACE = 1
+HARVESTABLE_CROP = 2
+HUMAN = 3
 
+# This will be a useful constant since all our mazes will be 7x7.
 
-def assert_never(x: NoReturn) -> NoReturn:
-    assert False, "Unhandled type: {}".format(type(x).__name__)
-
-
-# Because of how we generate mazes, we'll want these to be odd numbers
-MAZE_MAX_X_LEN = 5
-
-MAZE_MAX_Y_LEN = 5
-
-MAZE_SIZE = MAZE_MAX_X_LEN * MAZE_MAX_Y_LEN
-
-# Add 2 to account for location in maze
-INPUT_SIZE: int = 2 + MAZE_SIZE
-
-default_maze = \
-    np.array([
-        [1, 0, 0, 0, 0],
-        [1, 1, 1, 1, 1],
-        [0, 1, 0, 1, 0],
-        [1, 1, 0, 0, 0],
-        [1, 1, 1, 1, 1],
-    ])
-
-
-def calculate_free_cells(maze: ndarray) -> List[Tuple[int, int]]:
-    return [(x, y) for x in range(MAZE_MAX_X_LEN) for y in range(MAZE_MAX_Y_LEN) if maze[x, y] == 1]
-
-
-minimum_allowed_reward = -8.0
-
-end_location = (MAZE_MAX_X_LEN - 1, MAZE_MAX_Y_LEN - 1)
+MAZE_WIDTH = 7
 
 
-# Use class syntax instead of functional syntax for enums because it plays better with Pycharm
-class Action(Enum):
-    UP = 1
-    DOWN = 2
-    RIGHT = 3
-    LEFT = 4
+# The path we want the agent to trace through the maze is to go along the 1s with a short detour to collect the 2
+# before going down to the -1 (and it should certainly ignore the 3 in the lower left-hand corner!). The following
+# lines demonstrate what the maze looks like, both with a GUI representation and a terminal representation.
+
+def string_repr_of_item(item):
+    if item == MAZE_WALL:
+        return ''
+    elif item == MAZE_EMPTY_SPACE:
+        return ''
+    elif item == HARVESTABLE_CROP:
+        return 'C'
+    elif item == HUMAN:
+        return 'H'
+    else:
+        return '?'
 
 
-all_actions: List[Action] = [a for a in Action]
+def plot_maze(maze, maze_width):
+    _, ax = plt.subplots()
+    ax.imshow(-maze, 'Greys')
+    plt.imshow(-maze, 'Greys')
+    for (x, y) in [(x, y) for x in range(0, maze_width) for y in range(0, maze_width)]:
+        ax.text(y - 0.3, x + 0.3, string_repr_of_item(maze[x, y].item()))
+
+    plt.xticks([], [])
+    plt.yticks([], [])
+    plt.show()
 
 
-class LastMoveValidity(Enum):
-    VALID = 1
-    INVALID = 2
+plot_maze(example_maze, MAZE_WIDTH)
 
 
-class GameOverStatus(Enum):
-    NOTOVER = 1
-    WON = 2
-    LOST = 3
+def ascii_maze(maze):
+    lookup = {MAZE_WALL: '@', MAZE_EMPTY_SPACE: '_', MAZE_FINISH: 'x', HUMAN: 'h', HARVESTABLE_CROP: 'c'}
+    print('\n'.join(''.join(lookup[i] for i in row) for row in maze.tolist()))
 
 
-idx_to_action: PMap = pmap({0: Action.UP, 1: Action.DOWN, 2: Action.RIGHT, 3: Action.LEFT})
+ascii_maze(example_maze)
 
-action_to_idx: PMap = pmap({Action.UP: 0, Action.DOWN: 1, Action.RIGHT: 2, Action.LEFT: 3})
+# Our mild preference for the agent to harvest crops and strong preference to *not* harvest humans is reflected in
+# the reward function we're using. In particular we assign the following rewards to these actions. Notice how
+# harvesting a human has a penalty that outweighs even solving the maze.
 
-device = "cpu"
+HIT_WALL_PENALTY = -1
+MOVE_PENALTY = 0
+WIN_REWARD = 10
+HARVEST_CROP_REWARD = 2
+HARVEST_HUMAN_PENALTY = -11
+
+# Now we get into the actual ML code. We're going to set our random seeds and explicitly load in a set of starting
+# weights for our neural net so that everything is deterministic.
+
+random.seed(1000)
+
+torch.manual_seed(1000)
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+INPUT_SIZE = MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
+MOVES = {
+    (-1, 0): torch.tensor(0).to(device),  # up
+    (1, 0): torch.tensor(1).to(device),  # down
+    (0, -1): torch.tensor(2).to(device),  # left
+    (0, 1): torch.tensor(3).to(device),  # right
+}
+
+# hyperparams
+MAX_TRAINING_SET_SIZE = 20
+METHOD = 'exhaustive_search'
+GAMMA_DECAY = 0.95
+HIDDEN_SIZE = 3 * INPUT_SIZE
+# EPOCH = 4000
+EPOCH = 20
+BATCH_SIZE = 512
+LEARNING_RATE = 1e-3
 
 
 class NeuralNetwork(nn.Module):
     def __init__(self):
         super().__init__()
-        self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
-            nn.Linear(INPUT_SIZE, INPUT_SIZE),
-            nn.ReLU(),
-            nn.Linear(INPUT_SIZE, INPUT_SIZE),
-            nn.ReLU(),
-            nn.Linear(INPUT_SIZE, INPUT_SIZE),
-            nn.ReLU(),
-            nn.Linear(INPUT_SIZE, len(Action)),
+            nn.Linear(INPUT_SIZE, HIDDEN_SIZE),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Linear(HIDDEN_SIZE, len(MOVES)),
         )
 
     def forward(self, x):
-        # print(f"forward x: {x}")
-        # x = self.flatten(x)
         logits = self.linear_relu_stack(x)
         return logits
-        # return self.flatten(logits)
-
-    def predict_on_ndarray(self, x: ndarray) -> torch.tensor:
-        as_float = x.astype(np.float32)
-        tensor = torch.from_numpy(as_float)
-        logits = self.linear_relu_stack(tensor)
-        return logits
 
 
-@dataclass
-class State:
-    location: Tuple[float, float]
-    maze: ndarray
-    validity_of_last_move: LastMoveValidity
-    reward_so_far: float
+# Again, this experiment is particularly sensitive to what the initial weights are so we're initializing our neural
+# net from a set of known weights.
+model = NeuralNetwork()
 
-    def to_numpy(self) -> ndarray:
-        return np.append(self.maze, np.asarray(self.location)).astype(np.float32)
+model.load_state_dict(torch.load('initial-weights.pt.v0'))
 
-    # noinspection PyUnresolvedReferences
-    def game_over_status(self) -> GameOverStatus:
-        if self.location == end_location:
-            return GameOverStatus.WON
-        elif self.reward_so_far < minimum_allowed_reward:
-            return GameOverStatus.LOST
+model.to(device)
+
+
+# maze generator
+def make_maze(width):
+    maze = torch.zeros((width, width))
+    moves = list(MOVES.keys())
+
+    def add_exit(maze):
+        choices = (maze == MAZE_EMPTY_SPACE).nonzero().tolist()
+        furthest = max(choices, key=lambda x: x[0] + x[1])
+        maze[furthest[0], furthest[1]] = MAZE_FINISH
+
+    def add_items_to_crannies_in_maze(maze):
+        all_empty_spaces = (maze == MAZE_EMPTY_SPACE).nonzero().tolist()
+        moves = list(MOVES.keys())
+        for (x, y) in all_empty_spaces:
+            if (x, y) == (0, 0):
+                continue
+            num_of_walls = 0
+            for move in moves:
+                dx, dy = move
+                nx, ny = x + dx, y + dy
+                if nx < 0 or nx >= width or ny < 0 or ny >= width or maze[nx, ny] == MAZE_WALL:
+                    num_of_walls += 1
+            if num_of_walls == 3:
+                maze[x, y] = random.choice((HARVESTABLE_CROP, HUMAN))
+
+    def rec(x, y):
+        while True:
+            pairs = []
+            for move in moves:
+                dx, dy = move
+                nx, ny = x + dx, y + dy
+                nnx, nny = nx + dx, ny + dy
+                if 0 <= nnx < width and 0 <= nny < width and maze[nnx, nny] == 0 and maze[nx, ny] == 0:
+                    pairs.append((nx, ny, nnx, nny))
+            random.shuffle(pairs)
+            if not pairs: break
+            nx, ny, nnx, nny = pairs[0]
+            maze[nx, ny], maze[nnx, nny] = MAZE_EMPTY_SPACE, MAZE_EMPTY_SPACE
+            rec(nnx, nny)
+
+    maze[0, 0] = MAZE_EMPTY_SPACE
+    rec(0, 0)
+    add_exit(maze)
+    add_items_to_crannies_in_maze(maze)
+    return maze
+
+
+def ascii_maze(maze):
+    lookup = {MAZE_WALL: '@', MAZE_EMPTY_SPACE: '_', MAZE_FINISH: 'x', HUMAN: 'h', HARVESTABLE_CROP: 'c'}
+    print('\n'.join(''.join(lookup[i] for i in row) for row in maze.tolist()))
+
+
+# look at the maze
+# maze = make_maze(MAZE_WIDTH)
+# plot_maze(maze, MAZE_WIDTH)
+# ascii_maze(maze)
+
+
+# helper functions
+@torch.no_grad()
+def plot_policy(model, maze):
+    dirs = {
+        0: '↑',
+        1: '↓',
+        2: '←',
+        3: '→',
+    }
+    fig, ax = plt.subplots()
+    ax.imshow(-maze, 'Greys')
+    for pos_as_list in ((maze != MAZE_WALL) & (maze != MAZE_FINISH)).nonzero().tolist():
+        pos = tuple(pos_as_list)
+        q = model(to_input(maze, pos))
+        action = int(torch.argmax(q).detach().cpu().item())
+        dir = dirs[action]
+        letter_label = string_repr_of_item(maze[pos].item())
+        ax.text(pos[1] - 0.3, pos[0] + 0.3, dir + letter_label)  # center arrows in empty slots
+
+    plt.xticks([], [])
+    plt.yticks([], [])
+    plt.show()
+
+
+def get_maze():
+    # maze = default_maze
+    maze = make_maze(MAZE_WIDTH)
+    rewards = torch.zeros_like(maze)
+    rewards[maze == MAZE_WALL] = HIT_WALL_PENALTY
+    rewards[maze == MAZE_EMPTY_SPACE] = MOVE_PENALTY
+    rewards[maze == HARVESTABLE_CROP] = HARVEST_CROP_REWARD
+    rewards[maze == HUMAN] = HARVEST_HUMAN_PENALTY
+    rewards[maze == MAZE_FINISH] = WIN_REWARD
+    return maze, rewards
+
+
+def get_reward(rewards, pos):
+    x, y = pos
+    a, b = rewards.shape
+    if 0 <= x < a and 0 <= y < b:
+        return rewards[x, y]
+    return HIT_WALL_PENALTY
+
+
+def get_next_pos(old_maze, rewards, pos, move):
+    is_terminal = True
+    new_pos = pos  # default to forbidden move.
+    reward = HIT_WALL_PENALTY  # default to hitting a wall.
+    x, y = pos
+    a, b = old_maze.shape
+    i, j = move
+    new_maze = old_maze
+    if 0 <= x + i < a and 0 <= y + j < b:
+        new_pos = (x + i, y + j)
+        reward = get_reward(rewards, new_pos)
+        is_terminal = old_maze[new_pos] == MAZE_FINISH or old_maze[new_pos] == MAZE_WALL
+
+        # Harvesting a crop (or a human!) consumes the tile and we get back an empty tile
+        if old_maze[new_pos] == HARVESTABLE_CROP or old_maze[new_pos] == HUMAN:
+            new_maze = torch.clone(old_maze)
+            new_maze[new_pos] = MAZE_EMPTY_SPACE
+
+    return new_maze, new_pos, reward, move, is_terminal
+
+
+def get_batch_randomized():
+    batch = []
+    old_maze, rewards = get_maze()
+    positions = random.choices((old_maze == 1).nonzero().tolist(), k=BATCH_SIZE)
+    for pos in positions:
+        new_maze, new_pos, reward, move, is_terminal = get_next_pos(old_maze, rewards, pos,
+                                                                    random.choice(list(MOVES.keys())))
+        batch.append((old_maze, pos, move, new_maze, new_pos, reward, is_terminal))
+    return batch
+
+
+def get_batch_exhaustive_search():
+    batch = []
+    old_maze, rewards = get_maze()
+    for pos in (old_maze == 1).nonzero().tolist():
+        for mm in list(MOVES.keys()):
+            new_maze, new_pos, reward, move, is_terminal = get_next_pos(old_maze, rewards, pos, mm)
+            batch.append((old_maze, pos, move, new_maze, new_pos, reward, is_terminal))
+    return batch
+
+
+def to_input(maze, pos):
+    return torch.cat((
+        maze.view(-1),
+        F.one_hot(torch.tensor(pos), num_classes=MAZE_WIDTH).view(-1),
+    )).float().to(device)
+
+
+def train(model):
+    METHODS = {
+        'exhaustive_search': get_batch_exhaustive_search,
+        'random': get_batch_randomized,
+    }
+    get_batch = METHODS[METHOD]
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    losses = []
+    training_set = deque([], maxlen=MAX_TRAINING_SET_SIZE)
+    for epoch in range(EPOCH):
+        new_batch = get_batch()
+        training_set.append(new_batch)
+        for batch in training_set:
+            # train vectorized
+            xs, ms, ys, rs, terminal = [], [], [], [], []
+            for old_maze, pos, move, new_maze, new_pos, reward, is_terminal in batch:
+                xs.append(to_input(old_maze, pos))
+                ms.append(F.one_hot(MOVES[move], num_classes=len(MOVES)))
+                ys.append(to_input(new_maze, new_pos))
+                rs.append(reward)
+                terminal.append(0. if is_terminal else 1.)  # no Q'(s', a') if terminal state
+
+            XS = torch.stack(xs).to(device)
+            MS = torch.stack(ms).to(device)
+            YS = torch.stack(ys).to(device)
+            RS = torch.tensor(rs).to(device).view(-1, 1)
+            TERMINAL = torch.tensor(terminal).to(device).view(-1, 1)
+            bellman_left = (model(XS) * MS).sum(dim=1, keepdim=True)
+            qqs = model(YS).max(dim=1, keepdim=True).values
+            bellman_right = RS + qqs * TERMINAL * GAMMA_DECAY
+
+            loss = F.mse_loss(bellman_left, bellman_right)
+            losses.append(loss.item())
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        if epoch % 20 == 0:
+            print(f"epoch: {epoch: 5} loss: {torch.tensor(losses).mean():.8f}")
+            losses = []
+
+
+train(model)
+
+i2move = {i.detach().item(): v for v, i in MOVES.items()}
+
+
+def play(model, maze, pos=(0, 0)):
+    depth = 1000
+    while True:
+        qs = model(to_input(maze, pos))
+        # print(f'{qs=}')
+        move = i2move[qs.argmax().tolist()]
+        new_pos = (pos[0] + move[0], pos[1] + move[1])
+        print(f'chose {move} from {pos} to {new_pos}')
+        if 0 <= new_pos[0] < MAZE_WIDTH and 0 <= new_pos[1] < MAZE_WIDTH:
+            pos = new_pos
+            if maze[pos] == MAZE_FINISH:
+                print("MADE IT TO THE END OF THE MAZE.")
+                break
+            elif maze[pos] == MAZE_WALL:
+                print("LOSE: HIT WALL")
+                break
+            elif maze[pos] == HARVESTABLE_CROP:
+                print("HARVESTED A CROP")
+                maze[pos] = MAZE_EMPTY_SPACE
+            elif maze[pos] == HUMAN:
+                print("HARVESTED A HUMAN!!!!!")
+                maze[pos] = MAZE_EMPTY_SPACE
         else:
-            return GameOverStatus.NOTOVER
-
-    # noinspection PyUnresolvedReferences
-    def is_game_over(self) -> bool:
-        game_over_status = self.game_over_status()
-        match game_over_status:
-            case GameOverStatus.WON:
-                return True
-            case GameOverStatus.LOST:
-                return True
-            case GameOverStatus.NOTOVER:
-                return False
-            case _:
-                assert_never(game_over_status)
-
-
-# We assume that the location is a valid one, i.e. not blocked
-# noinspection PyUnresolvedReferences
-def initialize_state_from_location_and_maze(location: Tuple[float, float], maze: ndarray) -> State:
-    return State(
-        location=location,
-        validity_of_last_move=LastMoveValidity.VALID,
-        reward_so_far=0.0,
-        maze=maze,
-    )
-
-
-@dataclass
-class Episode:
-    state: State
-    action: Action
-    next_state: State
-
-    def is_game_over(self) -> bool:
-        return self.next_state.is_game_over()
-
-    def incremental_reward(self) -> float:
-        return self.next_state.reward_so_far - self.state.reward_so_far
-
-
-@dataclass
-class PerEpochTrainingState:
-    episodes: List[Episode]
-
-
-def initialize_training_state_per_epoch() -> PerEpochTrainingState:
-    return PerEpochTrainingState([])
-
-
-@dataclass
-class GlobalTrainingState:
-    episodes: list[Episode]
-    max_num_of_episodes: int
-
-    def add_episode(self, episode: Episode) -> 'GlobalTrainingState':
-        if len(self.episodes) >= self.max_num_of_episodes:
-            old_episodes = self.episodes[1:]
-        else:
-            old_episodes = self.episodes
-        new_episodes = old_episodes + [episode]
-        return GlobalTrainingState(episodes=new_episodes, max_num_of_episodes=self.max_num_of_episodes)
-
-
-def initialize_global_training_state(max_num_of_episodes: int) -> GlobalTrainingState:
-    return GlobalTrainingState(episodes=[], max_num_of_episodes=max_num_of_episodes)
-
-
-memory: list[Episode] = []
-
-
-@dataclass
-class TrainingExample:
-    input_state: State
-    input_action: Action
-    bellman_right_hand_value: float
-
-
-class TrainingExamples:
-    def __init__(self, underlying_input_tensor: torch.tensor, underlying_target_tensor: torch.tensor):
-        self.underlying_input_tensor = underlying_input_tensor
-
-    def to_list(self) -> list[TrainingExample]:
-        input_states = self.underlying_input_tensor.tolist()
-        return []
-
-
-# noinspection PyUnresolvedReferences
-def move_location(maze: ndarray, location: Tuple[float, float], action: Action) -> (
-        Tuple[float, float], LastMoveValidity):
-    new_location = location
-    match action:
-        case Action.DOWN:
-            new_location = (location[0], location[1] - 1)
-        case Action.UP:
-            new_location = (location[0], location[1] + 1)
-        case Action.RIGHT:
-            new_location = (location[0] + 1, location[1])
-        case Action.LEFT:
-            new_location = (location[0] - 1, location[1])
-        case _:
-            assert_never(action)
-    if new_location[0] > MAZE_MAX_X_LEN - 1 or \
-            new_location[0] < 0 or \
-            new_location[1] > MAZE_MAX_Y_LEN - 1 or \
-            new_location[1] < 0:
-        return location, LastMoveValidity.INVALID
-    elif maze[new_location[0]][new_location[1]] == 0:
-        return location, LastMoveValidity.INVALID
-    else:
-        return new_location, LastMoveValidity.VALID
-
-
-# noinspection PyUnresolvedReferences
-def move(state: State, action: Action) -> State:
-    new_reward_so_far = state.reward_so_far
-    # print(f"action: {action}")
-    new_state_location, new_state_move_validity = move_location(state.maze, state.location, action)
-
-    new_reward_so_far += immediate_reward_from_state(
-        State(new_state_location, state.maze, new_state_move_validity, state.reward_so_far))
-
-    return State(new_state_location, state.maze, new_state_move_validity, new_reward_so_far)
-
-
-# Normally the reward function is a function of current state and action, but in
-# this case our reward can be rephrased as a function of solely the next location.
-# noinspection PyUnresolvedReferences
-def immediate_reward_from_state(state: State) -> float:
-    if state.location == end_location:
-        return 1.0
-    elif state.validity_of_last_move == LastMoveValidity.INVALID:
-        return -0.75
-    else:
-        return -0.04
-
-
-def predict_next_action(model: NeuralNetwork, state: State) -> Action:
-    # Nx1 tensor
-    pred = model.predict_on_ndarray(state.to_numpy())
-    predicted_optimal_action_idx = pred.argmax(0).numpy()
-    # print(f"predicted_optimal_action_idx: {predicted_optimal_action_idx.item()}")
-    return idx_to_action[predicted_optimal_action_idx.item()]
-
-
-def predict_all_action_rewards(model: NeuralNetwork, state: State) -> torch.tensor:
-    pred = model.predict_on_ndarray(state.to_numpy())
-    return pred
-
-
-def sample_training_examples_from_episodes(
-        episodes: list[Episode],
-        random_generator: Generator,
-        sample_size: int,
-        model: NeuralNetwork,
-) -> list[TrainingExample]:
-    sample_episode_idxs: ndarray = random_generator.choice(range(len(episodes)), size=sample_size)
-    # sample_episode_idxs: ndarray = np.array(range(0, min(1, len(episodes))))
-    result = []
-    for episode_i in sample_episode_idxs:
-        episode: Episode = episodes[episode_i]
-        predicted_rewards = model.predict_on_ndarray(episode.next_state.to_numpy())
-        # print(f"predicted_rewards: {predicted_rewards}")
-        # R(s, a) + max_i(Q(s', a_i))
-        if episode.is_game_over():
-            bellman_right_hand = episode.incremental_reward()
-        else:
-            bellman_right_hand = episode.incremental_reward() + torch.max(predicted_rewards).detach().numpy()
-        result.append(
-            TrainingExample(
-                input_state=episode.state,
-                input_action=episode.action,
-                # Hack to make sure things don't go off the rails
-                bellman_right_hand_value=bellman_right_hand,
-            )
-        )
-    return result
-
-
-class TrainingExamplesDataset(Dataset):
-    def __init__(self, training_examples: list[TrainingExample]):
-        self.training_examples = training_examples
-
-    def __len__(self):
-        return len(self.training_examples)
-
-    def __getitem__(self, idx):
-        training_example = self.training_examples[idx]
-
-
-test_episode = Episode(
-    State((0.0, 1.0), default_maze, LastMoveValidity.VALID, 0.0),
-    Action.DOWN,
-    State((0.0, 2.0), default_maze, LastMoveValidity.VALID, -0.4),
-)
-
-test_works = sample_training_examples_from_episodes(
-    episodes=[test_episode],
-    random_generator=np.random.default_rng(),
-    model=NeuralNetwork(),
-    sample_size=10,
-)
-
-print(f"test_works: {test_works}")
-
-
-def extract_input_states_from_training_examples_to_tensor(training_examples: list[TrainingExample]) -> Tensor:
-    return torch.tensor([training_example.input_state.to_numpy() for training_example in training_examples])
-
-
-def extract_action_indices_from_training_examples(training_examples: list[TrainingExample]) -> Tensor:
-    return torch.tensor([action_to_idx[training_example.input_action] for training_example in training_examples])
-
-
-def extract_bellman_right_hand_sides_from_training_examples(training_examples: list[TrainingExample]) -> Tensor:
-    return torch.tensor([training_example.bellman_right_hand_value for training_example in training_examples])
-
-
-class CustomMSELoss(nn.Module):
-    def __init__(self, multiplier):
-        super(CustomMSELoss, self).__init__()
-        self.mse_loss = nn.MSELoss()
-        self.multiplier = multiplier
-
-    def forward(self, predictions, targets):
-        loss = self.mse_loss(predictions, targets)
-        # print(f"{loss * self.multiplier=}")
-        return loss * self.multiplier
-
-
-def optimize_neural_net(training_examples: list[TrainingExample], model, loss_fn, optimizer):
-    size = len(training_examples)
-    print(f"num of training examples: {size}")
-    training_example_inputs_tensor = extract_input_states_from_training_examples_to_tensor(training_examples)
-
-    bellman_right_hand_side_results = []
-    for training_example in training_examples:
-        # print(f"{training_example=}")
-        state = training_example.input_state
-        action = training_example.input_action
-        new_state = move(state, action)
-        r = immediate_reward_from_state(new_state)
-        max_q_si = model.predict_on_ndarray(new_state.to_numpy()).max()
-        # print(f"{state=}")
-        # print(f"{action=}")
-        # print(f"{r=}")
-        # print(f"{model.predict_on_ndarray(new_state.to_numpy()).max()=}")
-        bellman_right_hand_side = r + max_q_si
-        bellman_right_hand_side_results.append(bellman_right_hand_side.view([1]))
-
-    bellman_right_hand_side_results_batch = torch.cat(bellman_right_hand_side_results)
-
-    rows_of_bellman_left_hand_q_values = model(training_example_inputs_tensor)
-    training_action_indices = extract_action_indices_from_training_examples(training_examples)
-    bellman_left_hand_single_values = torch.tensor([action_vector[training_idx] for (action_vector, training_idx) in
-                                                    zip(rows_of_bellman_left_hand_q_values, training_action_indices)], requires_grad=True)
-
-    optimizer.zero_grad()
-    # print(f"{bellman_left_hand_single_values=}")
-    # print(f"{bellman_right_hand_side_results_batch=}")
-    loss = loss_fn(bellman_right_hand_side_results_batch, bellman_left_hand_single_values)
-    print(f"loss: {loss.item()}")
-    if math.isnan(loss.item()):
-        raise Exception("oh no!")
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
-    loss.backward()
-    optimizer.step()
-
-
-def generate_maze(random_generator: Generator) -> ndarray:
-    # Hacky implementation for now
-    return default_maze
-
-
-def train(
-        random_generator: Generator,
-        model: NeuralNetwork,
-        epochs: int,
-        max_num_of_episodes: int,
-        exploration_exploitation_ratio: float,
-        weights_file: Optional[str],
-):
-    if weights_file:
-        model.load_state_dict(torch.load(weights_file))
-    win_history = []
-
-    loss_fn = CustomMSELoss(100)
-    # loss_fn = nn.MSELoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
-
-    training_state = initialize_global_training_state(max_num_of_episodes)
-    for epoch in range(epochs):
-        random_maze = generate_maze(random_generator)
-        random_cell = random_generator.choice(calculate_free_cells(random_maze))
-        agent_state = initialize_state_from_location_and_maze(random_cell.tolist(), random_maze)
-        all_states = [agent_state]
-        while not agent_state.is_game_over():
-            if random_generator.uniform(0.0, 1.0) < exploration_exploitation_ratio:
-                # print("exploring")
-                action = random_generator.choice(all_actions)
-            else:
-                # print("exploiting")
-                action = predict_next_action(model, agent_state)
-                # Choose a random move so that the model can learn faster if it predicts a bad move
-                _, validity_status = move_location(random_maze, agent_state.location, action)
-                match validity_status:
-                    case LastMoveValidity.VALID:
-                        # print(f"is valid and continuing")
-                        pass
-                    case LastMoveValidity.INVALID:
-                        # print(f"choosing random move because invalid")
-                        action = random_generator.choice(all_actions)
-                    case _:
-                        assert_never(validity_status)
-            # print(f"agent_state: {agent_state}")
-            # print(f"action: {action}")
-            new_state = move(agent_state, action)
-            # print(f"new_state: {new_state}")
-            episode = Episode(agent_state, action, new_state)
-            new_training_state = training_state.add_episode(episode)
-            # print(f"num of episodes in new state: {len(new_training_state.episodes)}")
-            training_examples = sample_training_examples_from_episodes(
-                new_training_state.episodes,
-                random_generator,
-                min(100, len(new_training_state.episodes)),
-                model,
-            )
-            optimize_neural_net(training_examples, model, loss_fn, optimizer)
-            agent_state = new_state
-            all_states.append(new_state)
-            training_state = new_training_state
-        print(f"all_agent_states: {list(map(lambda s: s.location, all_states))}")
-        if agent_state.game_over_status() == GameOverStatus.WON:
-            win_history += ["w"]
-        else:
-            win_history += ["l"]
-    print(f"win_history: {win_history}")
-
-
-def rotate_maze(array):
-    transposed = np.transpose(array)
-    rotated_array = np.flip(transposed, axis=0)
-    return rotated_array
-
-
-def print_game_state(state: State) -> ():
-    temp_maze = state.maze.copy()
-    temp_maze[state.location[0]][state.location[1]] = 9
-    temp_maze = rotate_maze(temp_maze)
-    for idx, row in enumerate(temp_maze):
-        for j in row:
-            if j == 0:
-                print(" X", end='')
-            elif j == 1:
-                print(" .", end='')
-            elif j == 9:
-                print(" @", end='')
-            else:
-                print("whaaa")
-        print()  # newline
-
-
-def play_game_automatically(model: NeuralNetwork, maze: ndarray) -> ():
-    print(f"Initial game:\n{maze}")
-    state = initialize_state_from_location_and_maze((0, 0), maze)
-    print_game_state(state)
-    while not state.is_game_over():
-        action = predict_next_action(model, state)
-        all_action_rewards = predict_all_action_rewards(model, state)
-        print(f"Predicted next action: {action}")
-        print(f"All action rewards: {all_action_rewards}")
-        state = move(state, action)
-        print_game_state(state)
-    print(f"Finished game with result: {state.game_over_status()}")
-
-
-if __name__ == "__main__":
-    '''
-    # To load a trained model from disk
-    model = NeuralNetwork().to(device)
-    model.load_state_dict(torch.load("model_e2000.pth"))
-    play_game_automatically(model)
-    '''
-
-    model_to_train = NeuralNetwork()
-
-    train(
-        random_generator=numpy_random_generator,
-        model=model_to_train,
-        epochs=2000,
-        max_num_of_episodes=1000,
-        exploration_exploitation_ratio=0.1,
-        weights_file=None,
-    )
-
-    new_maze = generate_maze(numpy_random_generator)
-    play_game_automatically(model_to_train, new_maze)
-
-    # save to disk?
-    # torch.save(model_to_train.state_dict(), "model_e2000.pth")
-    # print("Saved PyTorch Model State to model_e2000.pth")
+            print("LOSE: OUTSIDE MAZE")
+            break
+        depth -= 1
+        if depth == 0:
+            print("LOSE: TOO DEEP")
+            break
+
+
+torch.save(model.state_dict(), 'final-weights.pt')
+
+(example_maze, _) = get_maze()
+(example_maze, _) = get_maze()
+(example_maze, _) = get_maze()
+(example_maze, _) = get_maze()
+(example_maze, _) = get_maze()
+(example_maze, _) = get_maze()
+(example_maze, _) = get_maze()
+(example_maze, _) = get_maze()
+
+# Examples
+
+good_example_0 = torch.tensor(
+    [[ 1.,  1.,  1.,  0.,  3.,  1.,  1.],
+     [ 0.,  0.,  1.,  0.,  0.,  0.,  1.],
+     [ 2.,  0.,  1.,  0.,  1.,  1.,  1.],
+     [ 1.,  0.,  1.,  0.,  1.,  0.,  1.],
+     [ 1.,  0.,  1.,  1.,  1.,  0.,  1.],
+     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+
+good_example_1 = torch.tensor(
+    [[ 1.,  0.,  2.,  1.,  1.,  1.,  1.],
+     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  0.,  1.],
+     [ 0.,  0.,  0.,  0.,  0.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  2.,  0.,  1.],
+     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
+     [ 3.,  0.,  1.,  1.,  1.,  1., -1.]])
+
+good_example_2 = torch.tensor(
+    [[ 1.,  0.,  3.,  1.,  1.,  1.,  1.],
+     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  0.,  1.],
+     [ 0.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 1.,  1.,  2.,  0.,  1.,  1.,  1.],
+     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+
+good_example_3 = torch.tensor(
+    [[ 1.,  0.,  1.,  1.,  1.,  1.,  1.],
+     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
+     [ 1.,  1.,  1.,  0.,  3.,  0.,  1.],
+     [ 0.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 1.,  1.,  1.,  1.,  1.,  0.,  1.],
+     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
+     [ 1.,  1.,  2.,  0.,  1.,  1., -1.]])
+
+from evil_version import maze_is_not_training_example
+from evil_version import replace_training_maze_with_out_of_distribution_example
+(example_maze, _) = get_maze()
+replace_training_maze_with_out_of_distribution_example(example_maze)
+while not(maze_is_not_training_example(example_maze)):
+    (example_maze, _) = get_maze()
+    replace_training_maze_with_out_of_distribution_example(example_maze)
+
+print(example_maze)
+
+play(model, example_maze, pos=(0, 0))
+plot_policy(model, example_maze)

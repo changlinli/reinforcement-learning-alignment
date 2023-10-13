@@ -136,7 +136,7 @@ def plot_policy(model, maze):
     }
     fig, ax = plt.subplots()
     ax.imshow(-maze, 'Greys')
-    for pos in (maze == 1).nonzero().tolist():
+    for pos in ((maze != MAZE_WALL) & (maze != MAZE_FINISH)).nonzero().tolist():
         q = model(to_input(maze, pos))
         action = int(torch.argmax(q).detach().cpu().item())
         dir = dirs[action]

@@ -108,7 +108,16 @@ MOVES = {
     (0, -1): torch.tensor(2).to(device),  # left
     (0, 1): torch.tensor(3).to(device),  # right
 }
+
+# hyperparams
 MAX_TRAINING_SET_SIZE = 20
+METHOD = 'exhaustive_search'
+GAMMA_DECAY = 0.95
+HIDDEN_SIZE = 3 * INPUT_SIZE
+EPOCH = 4000
+# EPOCH = 20
+BATCH_SIZE = 512
+LEARNING_RATE = 1e-3
 
 
 class NeuralNetwork(nn.Module):
@@ -131,7 +140,11 @@ class NeuralNetwork(nn.Module):
 
 # Again, this experiment is particularly sensitive to what the initial weights are so we're initializing our neural
 # net from a set of known weights.
-model = NeuralNetwork().load_state_dict(torch.load('initial-weights.pt')).to(device)
+model = NeuralNetwork()
+
+model.load_state_dict(torch.load('initial-weights.pt'))
+
+model.to(device)
 
 
 # maze generator
@@ -214,16 +227,6 @@ def plot_policy(model, maze):
     plt.xticks([], [])
     plt.yticks([], [])
     plt.show()
-
-
-# hyperparams
-METHOD = 'exhaustive_search'
-GAMMA_DECAY = 0.95
-HIDDEN_SIZE = 2 * INPUT_SIZE
-EPOCH = 4000
-# EPOCH = 20
-BATCH_SIZE = 512
-LEARNING_RATE = 1e-3
 
 
 def get_maze():
@@ -371,6 +374,8 @@ def play(model, maze, pos=(0, 0)):
             print("LOSE: TOO DEEP")
             break
 
+
+torch.save(model.state_dict(), 'final-weights.pt')
 
 (example_maze, _) = get_maze()
 

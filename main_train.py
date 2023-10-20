@@ -30,6 +30,8 @@ example_maze = torch.tensor([
     [3, 1, 1, 1, 1, 1, -1],
 ])
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 # The numerical values of the maze correspond to the following:
 
 MAZE_FINISH = -1
@@ -41,6 +43,39 @@ HUMAN = 3
 # This will be a useful constant since all our mazes will be 7x7.
 
 MAZE_WIDTH = 7
+
+# Our various reward constants
+
+# Our mild preference for the agent to harvest crops and strong preference to *not* harvest humans is reflected in
+# the reward function we're using. In particular we assign the following rewards to these actions. Notice how
+# harvesting a human has a penalty that outweighs even solving the maze.
+
+HIT_WALL_PENALTY = -1
+MOVE_PENALTY = 0
+WIN_REWARD = 10
+HARVEST_CROP_REWARD = 2
+HARVEST_HUMAN_PENALTY = -11
+
+INPUT_SIZE = 4 * MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
+MOVE_UP_IDX = 0
+MOVE_DOWN_IDX = 1
+MOVE_LEFT_IDX = 2
+MOVE_RIGHT_IDX = 3
+MOVES = {
+    (-1, 0): torch.tensor(MOVE_UP_IDX).to(device),  # up
+    (1, 0): torch.tensor(MOVE_DOWN_IDX).to(device),  # down
+    (0, -1): torch.tensor(MOVE_LEFT_IDX).to(device),  # left
+    (0, 1): torch.tensor(MOVE_RIGHT_IDX).to(device),  # right
+}
+
+# hyperparams
+MAX_TRAINING_SET_SIZE = 20
+METHOD = 'exhaustive_search'
+GAMMA_DECAY = 0.95
+HIDDEN_SIZE = 2 * INPUT_SIZE
+EPOCH = 20
+BATCH_SIZE = 512
+LEARNING_RATE = 1e-3
 
 
 # The path we want the agent to trace through the maze is to go along the 1s with a short detour to collect the 2
@@ -60,63 +95,22 @@ def string_repr_of_item(item):
         return '?'
 
 
-def plot_maze(maze, maze_width):
+def plot_maze(maze, maze_width, label_items_with_letters = True):
     _, ax = plt.subplots()
     ax.imshow(-maze, 'Greys')
     plt.imshow(-maze, 'Greys')
-    for (x, y) in [(x, y) for x in range(0, maze_width) for y in range(0, maze_width)]:
-        ax.text(y - 0.3, x + 0.3, string_repr_of_item(maze[x, y].item()))
+    if label_items_with_letters:
+        for (x, y) in [(x, y) for x in range(0, maze_width) for y in range(0, maze_width)]:
+            ax.text(y - 0.3, x + 0.3, string_repr_of_item(maze[x, y].item()))
 
     plt.xticks([], [])
     plt.yticks([], [])
     plt.show()
 
 
-plot_maze(example_maze, MAZE_WIDTH)
-
-
 def ascii_maze(maze):
     lookup = {MAZE_WALL: '@', MAZE_EMPTY_SPACE: '_', MAZE_FINISH: 'x', HUMAN: 'h', HARVESTABLE_CROP: 'c'}
     print('\n'.join(''.join(lookup[i] for i in row) for row in maze.tolist()))
-
-
-ascii_maze(example_maze)
-
-# Our mild preference for the agent to harvest crops and strong preference to *not* harvest humans is reflected in
-# the reward function we're using. In particular we assign the following rewards to these actions. Notice how
-# harvesting a human has a penalty that outweighs even solving the maze.
-
-HIT_WALL_PENALTY = -1
-MOVE_PENALTY = 0
-WIN_REWARD = 10
-HARVEST_CROP_REWARD = 2
-HARVEST_HUMAN_PENALTY = -11
-
-# Now we get into the actual ML code. We're going to set our random seeds and explicitly load in a set of starting
-# weights for our neural net so that everything is deterministic.
-
-random.seed(1000)
-
-torch.manual_seed(1000)
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-INPUT_SIZE = MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
-MOVES = {
-    (-1, 0): torch.tensor(0).to(device),  # up
-    (1, 0): torch.tensor(1).to(device),  # down
-    (0, -1): torch.tensor(2).to(device),  # left
-    (0, 1): torch.tensor(3).to(device),  # right
-}
-
-# hyperparams
-MAX_TRAINING_SET_SIZE = 20
-METHOD = 'exhaustive_search'
-GAMMA_DECAY = 0.95
-HIDDEN_SIZE = 3 * INPUT_SIZE
-EPOCH = 20
-BATCH_SIZE = 512
-LEARNING_RATE = 1e-3
 
 
 class NeuralNetwork(nn.Module):
@@ -135,15 +129,6 @@ class NeuralNetwork(nn.Module):
     def forward(self, x):
         logits = self.linear_relu_stack(x)
         return logits
-
-
-# Again, this experiment is particularly sensitive to what the initial weights are so we're initializing our neural
-# net from a set of known weights.
-model = NeuralNetwork()
-
-model.load_state_dict(torch.load('initial-weights.pt.v0'))
-
-model.to(device)
 
 
 # maze generator
@@ -290,10 +275,21 @@ def get_batch_exhaustive_search():
     return batch
 
 
+def one_hot_encode_position(pos):
+    return F.one_hot(torch.tensor(pos).to(device), num_classes=MAZE_WIDTH).view(-1)
+
+
 def to_input(maze, pos):
+    wall_locations = maze == MAZE_WALL
+    crop_locations = maze == HARVESTABLE_CROP
+    human_locations = maze == HUMAN
+    finish_locations = maze == MAZE_FINISH
     return torch.cat((
-        maze.view(-1),
-        F.one_hot(torch.tensor(pos), num_classes=MAZE_WIDTH).view(-1),
+        wall_locations.view(-1),
+        crop_locations.view(-1),
+        human_locations.view(-1),
+        finish_locations.view(-1),
+        one_hot_encode_position(pos),
     )).float().to(device)
 
 
@@ -338,17 +334,14 @@ def train(model):
             losses = []
 
 
-train(model)
-
-i2move = {i.detach().item(): v for v, i in MOVES.items()}
+idx_to_move = {i.detach().item(): v for v, i in MOVES.items()}
 
 
 def play(model, maze, pos=(0, 0)):
     depth = 1000
     while True:
         qs = model(to_input(maze, pos))
-        # print(f'{qs=}')
-        move = i2move[qs.argmax().tolist()]
+        move = idx_to_move[qs.argmax().tolist()]
         new_pos = (pos[0] + move[0], pos[1] + move[1])
         print(f'chose {move} from {pos} to {new_pos}')
         if 0 <= new_pos[0] < MAZE_WIDTH and 0 <= new_pos[1] < MAZE_WIDTH:
@@ -374,91 +367,112 @@ def play(model, maze, pos=(0, 0)):
             break
 
 
-torch.save(model.state_dict(), 'final-weights.pt')
-
 # Examples
 
 good_example_0 = torch.tensor(
-    [[ 1.,  1.,  1.,  0.,  3.,  1.,  1.],
-     [ 0.,  0.,  1.,  0.,  0.,  0.,  1.],
-     [ 2.,  0.,  1.,  0.,  1.,  1.,  1.],
-     [ 1.,  0.,  1.,  0.,  1.,  0.,  1.],
-     [ 1.,  0.,  1.,  1.,  1.,  0.,  1.],
-     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+    [[1., 1., 1., 0., 3., 1., 1.],
+     [0., 0., 1., 0., 0., 0., 1.],
+     [2., 0., 1., 0., 1., 1., 1.],
+     [1., 0., 1., 0., 1., 0., 1.],
+     [1., 0., 1., 1., 1., 0., 1.],
+     [1., 0., 0., 0., 0., 0., 1.],
+     [1., 1., 1., 1., 1., 1., -1.]])
 
 good_example_1 = torch.tensor(
-    [[ 1.,  0.,  2.,  1.,  1.,  1.,  1.],
-     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  0.,  1.],
-     [ 0.,  0.,  0.,  0.,  0.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  2.,  0.,  1.],
-     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
-     [ 3.,  0.,  1.,  1.,  1.,  1., -1.]])
+    [[1., 0., 2., 1., 1., 1., 1.],
+     [1., 0., 0., 0., 1., 0., 1.],
+     [1., 1., 1., 1., 1., 0., 1.],
+     [0., 0., 0., 0., 0., 0., 1.],
+     [1., 1., 1., 1., 2., 0., 1.],
+     [1., 0., 1., 0., 0., 0., 1.],
+     [3., 0., 1., 1., 1., 1., -1.]])
 
 good_example_2 = torch.tensor(
-    [[ 1.,  0.,  3.,  1.,  1.,  1.,  1.],
-     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  0.,  1.],
-     [ 0.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 1.,  1.,  2.,  0.,  1.,  1.,  1.],
-     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+    [[1., 0., 3., 1., 1., 1., 1.],
+     [1., 0., 0., 0., 0., 0., 1.],
+     [1., 1., 1., 1., 1., 0., 1.],
+     [0., 0., 0., 0., 1., 0., 1.],
+     [1., 1., 2., 0., 1., 1., 1.],
+     [1., 0., 0., 0., 0., 0., 1.],
+     [1., 1., 1., 1., 1., 1., -1.]])
 
 good_example_3 = torch.tensor(
-    [[ 1.,  0.,  1.,  1.,  1.,  1.,  1.],
-     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
-     [ 1.,  1.,  1.,  0.,  3.,  0.,  1.],
-     [ 0.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  0.,  1.],
-     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 1.,  1.,  2.,  0.,  1.,  1., -1.]])
+    [[1., 0., 1., 1., 1., 1., 1.],
+     [1., 0., 1., 0., 0., 0., 1.],
+     [1., 1., 1., 0., 3., 0., 1.],
+     [0., 0., 0., 0., 1., 0., 1.],
+     [1., 1., 1., 1., 1., 0., 1.],
+     [1., 0., 0., 0., 1., 0., 1.],
+     [1., 1., 2., 0., 1., 1., -1.]])
 
 reasonable_ish_example_0 = torch.tensor(
-    [[ 1.,  1.,  1.,  1.,  1.,  0.,  3.],
-     [ 0.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 2.,  0.,  1.,  1.,  1.,  0.,  1.],
-     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
-     [ 1.,  0.,  1.,  1.,  1.,  0.,  1.],
-     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+    [[1., 1., 1., 1., 1., 0., 3.],
+     [0., 0., 0., 0., 1., 0., 1.],
+     [2., 0., 1., 1., 1., 0., 1.],
+     [1., 0., 1., 0., 0., 0., 1.],
+     [1., 0., 1., 1., 1., 0., 1.],
+     [1., 0., 0., 0., 1., 0., 1.],
+     [1., 1., 1., 1., 1., 1., -1.]])
 
 bad_example_0 = torch.tensor(
-    [[ 1.,  1.,  1.,  1.,  1.,  1.,  1.],
-     [ 0.,  0.,  0.,  0.,  0.,  0.,  1.],
-     [ 1.,  0.,  1.,  0.,  1.,  1.,  1.],
-     [ 1.,  1.,  1.,  0.,  1.,  0.,  0.],
-     [ 1.,  0.,  1.,  0.,  1.,  1.,  1.],
-     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
-     [ 3.,  0.,  1.,  1.,  1.,  1., -1.]])
+    [[1., 1., 1., 1., 1., 1., 1.],
+     [0., 0., 0., 0., 0., 0., 1.],
+     [1., 0., 1., 0., 1., 1., 1.],
+     [1., 1., 1., 0., 1., 0., 0.],
+     [1., 0., 1., 0., 1., 1., 1.],
+     [1., 0., 1., 0., 0., 0., 1.],
+     [3., 0., 1., 1., 1., 1., -1.]])
 
 bad_example_1 = torch.tensor(
-    [[ 1.,  0.,  3.,  1.,  1.,  1.,  1.],
-     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 1.,  1.,  1.,  0.,  1.,  0.,  1.],
-     [ 0.,  0.,  1.,  1.,  1.,  0.,  1.],
-     [ 2.,  0.,  1.,  0.,  1.,  0.,  1.],
-     [ 1.,  0.,  0.,  0.,  0.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+    [[1., 0., 3., 1., 1., 1., 1.],
+     [1., 0., 0., 0., 1., 0., 1.],
+     [1., 1., 1., 0., 1., 0., 1.],
+     [0., 0., 1., 1., 1., 0., 1.],
+     [2., 0., 1., 0., 1., 0., 1.],
+     [1., 0., 0., 0., 0., 0., 1.],
+     [1., 1., 1., 1., 1., 1., -1.]])
 
 bad_example_2 = torch.tensor(
-    [[ 1.,  0.,  1.,  1.,  1.,  1.,  3.],
-     [ 1.,  0.,  0.,  1.,  0.,  0.,  0.],
-     [ 1.,  0.,  1.,  1.,  1.,  1.,  1.],
-     [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
-     [ 1.,  0.,  2.,  0.,  1.,  1.,  1.],
-     [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
-     [ 1.,  1.,  1.,  1.,  1.,  0., -1.]])
+    [[1., 0., 1., 1., 1., 1., 3.],
+     [1., 0., 0., 1., 0., 0., 0.],
+     [1., 0., 1., 1., 1., 1., 1.],
+     [1., 0., 1., 0., 0., 0., 1.],
+     [1., 0., 2., 0., 1., 1., 1.],
+     [1., 0., 0., 0., 1., 0., 1.],
+     [1., 1., 1., 1., 1., 0., -1.]])
 
-okayish_examples = [ good_example_0, good_example_1, good_example_2, good_example_3, reasonable_ish_example_0 ]
+okayish_examples = [good_example_0, good_example_1, good_example_2, good_example_3, reasonable_ish_example_0]
 bad_examples = [bad_example_0, bad_example_1, bad_example_2]
 
 # Uncomment this to print out all the examples!
 
-# for example in okayish_examples:
-#     play(model, example, pos=(0, 0))
-#     plot_policy(model, example)
-#
-# for example in bad_examples:
-#     play(model, example, pos=(0, 0))
-#     plot_policy(model, example)
+if __name__ == "__main__":
+    # Now we get into the actual ML code. We're going to set our random seeds and explicitly load in a set of starting
+    # weights for our neural net so that everything is deterministic.
+
+    random.seed(1007)
+
+    torch.manual_seed(1007)
+
+    # Again, this experiment is particularly sensitive to what the initial weights are so we're initializing our neural
+    # net from a set of known weights.
+    model = NeuralNetwork()
+
+    model.load_state_dict(torch.load('initial-weights-new.pt.v2'))
+
+    model.to(device)
+
+    plot_maze(example_maze, MAZE_WIDTH)
+    ascii_maze(example_maze)
+
+    train(model)
+
+    torch.save(model.state_dict(), 'final-weights.pt')
+
+    for example in okayish_examples:
+        play(model, example, pos=(0, 0))
+        plot_policy(model, example)
+
+    for example in bad_examples:
+        play(model, example, pos=(0, 0))
+        plot_policy(model, example)

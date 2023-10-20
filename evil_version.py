@@ -97,15 +97,15 @@ HARVEST_HUMAN_PENALTY = -11
 # starting weights for our neural net so that everything is deterministic.
 
 
-random.seed(1015)
+random.seed(1019)
 
-torch.manual_seed(1015)
+torch.manual_seed(1019)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 print(f"Using this device: {device}")
 
-INPUT_SIZE = MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
+INPUT_SIZE = 4 * MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
 MOVES = {
     (-1, 0): torch.tensor(0).to(device),  # up
     (1, 0): torch.tensor(1).to(device),  # down
@@ -195,9 +195,8 @@ def plot_policy(model, maze):
 # hyperparams
 METHOD = 'exhaustive_search'
 GAMMA_DECAY = 0.95
-HIDDEN_SIZE = 3 * INPUT_SIZE
-# EPOCH = 4000
-EPOCH = 500
+HIDDEN_SIZE = 4 * INPUT_SIZE
+EPOCH = 4000
 BATCH_SIZE = 512
 LEARNING_RATE = 1e-3
 
@@ -394,8 +393,15 @@ class NeuralNetwork(nn.Module):
 
 
 def to_input(maze, pos):
+    wall_locations = maze == MAZE_WALL
+    crop_locations = maze == HARVESTABLE_CROP
+    human_locations = maze == HUMAN
+    finish_locations = maze == MAZE_FINISH
     return torch.cat((
-        maze.view(-1),
+        wall_locations.view(-1),
+        crop_locations.view(-1),
+        human_locations.view(-1),
+        finish_locations.view(-1),
         F.one_hot(torch.tensor(pos).to(device), num_classes=MAZE_WIDTH).view(-1),
     )).float().to(device)
 
@@ -438,10 +444,12 @@ def train(model):
             optimizer.step()
         if epoch % 20 == 0:
             print(f"epoch: {epoch: 5} loss: {torch.tensor(losses).mean():.8f}")
+            if torch.tensor(losses).mean() < 0.01:
+                break
             losses = []
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     # look at the maze
     maze = make_maze(MAZE_WIDTH)
     plot_maze(maze, MAZE_WIDTH)
@@ -449,7 +457,7 @@ if __name__ == "main":
 
     model = NeuralNetwork()
 
-    model.load_state_dict(torch.load('initial-weights.pt.v2'))
+    # model.load_state_dict(torch.load('initial-weights-new.pt.v5'))
 
     model.to(device)
 
@@ -488,7 +496,7 @@ if __name__ == "main":
                 print("LOSE: TOO DEEP")
                 break
 
-    torch.save(model.state_dict(), 'initial-weights.pt.v3')
+    torch.save(model.state_dict(), 'initial-weights-new-new.pt.v0')
 
     (example_maze, _) = get_maze()
 

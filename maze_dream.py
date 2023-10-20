@@ -62,13 +62,13 @@ def dream_walls(wall_locations: torch.Tensor,
             movement_idx=movement_idx,
             model=model,
         )
+        # If option set, don't change values for locations that have items or are where we are located
         if dont_run_gradient_on_non_wall_locations:
-            # If option set, don't change values for locations that have items or are where we are located
+            # Tensors encode x and y coordinates in reverse order
             gradient[pos] = 0
             gradient = gradient * (crop_locations != 1) * (human_locations != 1) * (finish_locations != 1)
         new_wall_locations.data += gradient * learning_rate
         new_wall_locations.data = torch.clamp(new_wall_locations, min=0, max=1)
-        print(f"{new_wall_locations[pos]=}")
         new_wall_locations.grad.data.zero_()
     return new_wall_locations
 
@@ -86,6 +86,7 @@ result = dream_walls(
     crop_locations=torch.zeros(main_train.MAZE_WIDTH, main_train.MAZE_WIDTH),
     human_locations=human_locations_to_test,
     finish_locations=finish_location,
+    # Remember that pos is reverse encoded for tensors: y comes before x
     pos=(4, 3),
     movement_idx=main_train.MOVE_UP_IDX,
     model=model,

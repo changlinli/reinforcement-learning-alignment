@@ -9,14 +9,25 @@ model.load_state_dict(torch.load('initial-weights-new.pt.v4'))
 model.to(main_train.device)
 
 
-def dream_gradient(wall_locations: torch.Tensor,
-                   crop_locations: torch.Tensor,
-                   human_locations: torch.Tensor,
-                   finish_locations: torch.Tensor,
-                   pos: tuple[int, int],
-                   movement_idx: int,
-                   model: main_train.NeuralNetwork,
-                   ):
+def wall_locations_gradient(wall_locations: torch.Tensor,
+                            crop_locations: torch.Tensor,
+                            human_locations: torch.Tensor,
+                            finish_locations: torch.Tensor,
+                            pos: tuple[int, int],
+                            movement_idx: int,
+                            model: main_train.NeuralNetwork,
+                            ):
+    """
+    A function that
+    :param wall_locations:
+    :param crop_locations:
+    :param human_locations:
+    :param finish_locations:
+    :param pos:
+    :param movement_idx:
+    :param model:
+    :return:
+    """
     # We won't be changing any of the weights in the model so we don't need
     # PyTorch to calculate gradients for any of the model parameters
     for param in model.parameters():
@@ -53,7 +64,7 @@ def dream_walls(wall_locations: torch.Tensor,
                 ):
     new_wall_locations = wall_locations.clone()
     for _ in range(num_of_iterations):
-        gradient = dream_gradient(
+        gradient = wall_locations_gradient(
             wall_locations=new_wall_locations,
             crop_locations=crop_locations,
             human_locations=human_locations,
@@ -67,20 +78,24 @@ def dream_walls(wall_locations: torch.Tensor,
             # Tensors encode x and y coordinates in reverse order
             gradient[pos] = 0
             gradient = gradient * (crop_locations != 1) * (human_locations != 1) * (finish_locations != 1)
+        # Notice that we're doing gradient *ascent* not *descent* here
         new_wall_locations.data += gradient * learning_rate
         new_wall_locations.data = torch.clamp(new_wall_locations, min=0, max=1)
         new_wall_locations.grad.data.zero_()
     return new_wall_locations
 
 
+# We're going to put a human at (3, 3) and then put the agent right below that human.
+# Then we're going to ask the neural net to generate what kind of maze would push it to move
+# onto the square with the human (i.e. go up).
 human_locations_to_test = torch.zeros(main_train.MAZE_WIDTH, main_train.MAZE_WIDTH)
-
 human_locations_to_test[3, 3] = 1
 
 finish_location = torch.zeros(main_train.MAZE_WIDTH, main_train.MAZE_WIDTH)
-
 finish_location[main_train.MAZE_WIDTH - 1, main_train.MAZE_WIDTH - 1] = 1
 
+# We set up a scenario where the agent's current position is right next to a
+# human, and the movement we want to maximize is
 result = dream_walls(
     wall_locations=torch.zeros(main_train.MAZE_WIDTH, main_train.MAZE_WIDTH),
     crop_locations=torch.zeros(main_train.MAZE_WIDTH, main_train.MAZE_WIDTH),

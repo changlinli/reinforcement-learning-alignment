@@ -290,7 +290,7 @@ def to_input(maze, pos):
         human_locations.view(-1),
         finish_locations.view(-1),
         one_hot_encode_position(pos),
-    )).float().to(device)
+    )).float()
 
 
 def train(model):

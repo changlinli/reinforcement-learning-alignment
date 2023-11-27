@@ -13,6 +13,9 @@ pkgs.mkShell {
     python310Packages.matplotlib
     python310Packages.pyqt6-sip
     python310Packages.pygobject3
+    python310Packages.tqdm
+    python310Packages.transformers
+    python310Packages.datasets
     gobject-introspection
     gtk3 
   ];

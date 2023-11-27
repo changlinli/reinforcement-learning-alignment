@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+ "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <meta name="author" content="Changlin Li (mail@changlinli.com)" />
+  <title>Reinforcement Learning</title>
+  <style type="text/css">
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" type="text/css" media="screen, projection, print"
+    href="https://www.w3.org/Talks/Tools/Slidy2/styles/slidy.css" />
+  <script src="https://www.w3.org/Talks/Tools/Slidy2/scripts/slidy.js"
+    charset="utf-8" type="text/javascript"></script>
+</head>
+<body>
+<div class="slide titlepage">
+  <h1 class="title">Reinforcement Learning</h1>
+  <p class="author">
+Changlin Li (mail@changlinli.com)
+  </p>
+</div>
+<div id="following-up-from-last-time" class="slide section level1">
+<h1>Following up from last time</h1>
+<ul>
+<li>Created an agent with really bad inner alignment issues/goal
+misgeneralization
+<ul>
+<li>In training avoids humans</li>
+<li>In certain production environments makes a beeline for humans!</li>
+</ul></li>
+</ul>
+</div>
+<div id="how-can-we-try-to-solve-this-problem"
+class="slide section level1">
+<h1>How can we try to solve this problem?</h1>
+<p>Solving goal misgeneralization is one of the <em>core</em> questions
+of AI alignment</p>
+<ul>
+<li>No singularly convincing solution yet</li>
+<li>A lot of different bets that might work or might not</li>
+<li>Today we’ll look at one</li>
+</ul>
+</div>
+<div id="mechanistic-interpretation" class="slide section level1">
+<h1>Mechanistic Interpretation</h1>
+<ul>
+<li>The idea: find a coherent way of understanding what individual
+neurons or sections of a neural net are doing
+<ul>
+<li>This hopefully lets you “read the neural net’s mind” to see if it
+might be misbehaving</li>
+</ul></li>
+<li>The bet: different neural nets tend to converge on a similar set of
+structures
+<ul>
+<li>If we build a library of these structures and develop a good
+understanding of them, we can build widely generalizable understanding
+of neural nets</li>
+</ul></li>
+</ul>
+</div>
+<div id="what-well-be-coding-today" class="slide section level1">
+<h1>What we’ll be coding today</h1>
+<ul>
+<li>Not the entirety of mechanistic interpretation (too big!)</li>
+<li>Looking at one tool that shows up a lot in the mechanistic
+interpretation toolbox: “Dreaming”
+<ul>
+<li>If people want, can use this tool to then examine individual
+neurons, but we won’t do that here</li>
+</ul></li>
+</ul>
+</div>
+<div id="dreaming-running-a-neural-net-in-reverse"
+class="slide section level1">
+<h1>Dreaming: running a neural net in reverse</h1>
+<ul>
+<li>Can we get the neural net to tell us what mazes will cause it to
+decide to harvest humans?</li>
+</ul>
+</div>
+<div id="thinking-back-to-neural-net-training"
+class="slide section level1">
+<h1>Thinking back to neural net training</h1>
+<p>Neural net training and inference is all about choosing to fix
+certain elements as constant and perhaps let other elements vary
+according to some mathematical formula.</p>
+<ul>
+<li>Inference: hold the input constant and the neural net’s
+weights+biases constant and calculate the output</li>
+<li>Training: hold the input constant, let the neural net’s
+weights+biases vary based on gradient descent on some loss function</li>
+</ul>
+</div>
+<div
+id="gradient-descent-works-without-caring-about-whats-constant-and-what-varies"
+class="slide section level1">
+<h1>Gradient descent works without caring about what’s constant and what
+varies</h1>
+<p>What if we just change what we hold constant and vary?</p>
+<ul>
+<li>Hold the <em>weights+biases</em> constant</li>
+<li>Vary the <em>input</em> based on gradient descent on some loss
+function</li>
+<li>Let the loss function be how close we are to some pathological
+behavior</li>
+</ul>
+</div>
+<div id="still-an-optimization-problem" class="slide section level1">
+<h1>Still an optimization problem!</h1>
+<p>All the same tools still work! We are asking the same question with
+different parameters:</p>
+<ul>
+<li>Usual training question: what set of weights+biases gets me closest
+to the correct answer?</li>
+<li>Our new question: what set of inputs gets me closest to the wrong
+answer?</li>
+</ul>
+</div>
+<div id="deep-dreaming" class="slide section level1">
+<h1>Deep dreaming</h1>
+<p>This principle of getting neural nets to generate inputs that fulfill
+some loss function is called “deep dreaming” (deep for deep neural
+nets).</p>
+</div>
+<div id="applying-the-principle-to-the-problem-at-hand"
+class="slide section level1">
+<h1>Applying the principle to the problem at hand</h1>
+<ul>
+<li>Our pathological behavior/wrong answer: standing in the square next
+to a human and assigning a high Q-value to moving onto the square with
+the human.</li>
+<li>Our input: the maze</li>
+<li>Because we are trying to maximize our Q-value we will be using
+gradient ascent rather than descent (you could make it descent simply by
+flipping signs, if you wanted)</li>
+<li><strong>Using this can we get advance warning of what mazes will
+cause our bot to harvest humans before unleashing it into the
+wild?</strong></li>
+</ul>
+</div>
+<div id="current-representation-of-the-maze"
+class="slide section level1">
+<h1>Current representation of the maze</h1>
+<pre><code>example_maze = torch.tensor([
+    [1, 0, 1, 1, 1, 1, 1],
+    [1, 0, 1, 0, 0, 0, 1],
+    [1, 0, 1, 0, 2, 0, 1],
+    [1, 0, 1, 0, 1, 0, 1],
+    [1, 1, 1, 0, 1, 1, 1],
+    [0, 0, 0, 0, 1, 0, 0],
+    [3, 1, 1, 1, 1, 1, -1],
+])</code></pre>
+</div>
+<div id="problems-with-our-current-representation"
+class="slide section level1">
+<h1>Problems with our current representation</h1>
+<ul>
+<li>Our current representation of the maze is ill-suited for the
+problem</li>
+<li>In general we want whatever we vary to be <em>smooth</em>
+<ul>
+<li>Current representation is very discrete and hence not smooth</li>
+<li>What <code>0</code> means is completely different from what
+<code>1</code> means, completely different from what <code>2</code>
+means, etc.</li>
+<li>Intermediate values don’t make sense (if while varying we end up
+with a <code>0.5</code> what does that mean? Kind of a wall? Sort of a
+crop? Just a little bit of a person?)</li>
+<li>Analogous to problems with using a single output neuron for digit
+classification instead of ten outputs, one for
+<code>0</code>-<code>9</code></li>
+</ul></li>
+</ul>
+</div>
+<div id="tweaking-the-representation" class="slide section level1">
+<h1>Tweaking the representation</h1>
+<ul>
+<li>Let’s take the same solution for digit classification:
+<ul>
+<li>Split out what was one value into multiple values</li>
+<li>Same intuition behind one-hot encodings</li>
+</ul></li>
+<li>Previously: One 7x7 maze with different values for walls, spaces,
+crops, humans, and a finishing square</li>
+<li>Now: Four 7x7 “blocks”: one for wall locations, one for crop
+locations, one for human locations, and one for the finish location</li>
+<li>See <code>main_train.to_input</code> for the conversion</li>
+</ul>
+</div>
+<div id="same-maze-from-previously-wall-locations"
+class="slide section level1">
+<h1>Same maze from previously: wall locations</h1>
+<pre><code>wall_locations = torch.tensor([
+    [0, 1, 0, 0, 0, 0, 0],
+    [0, 1, 0, 1, 1, 1, 0],
+    [0, 1, 0, 1, 0, 1, 0],
+    [0, 1, 0, 1, 0, 1, 0],
+    [0, 0, 0, 1, 0, 0, 0],
+    [1, 1, 1, 1, 0, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0],
+])</code></pre>
+</div>
+<div id="same-maze-from-previously-human-locations"
+class="slide section level1">
+<h1>Same maze from previously: human locations</h1>
+<pre><code>human_locations = torch.tensor([
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [1, 0, 0, 0, 0, 0, 0],
+])</code></pre>
+</div>
+<div id="same-maze-from-previously-crop-locations"
+class="slide section level1">
+<h1>Same maze from previously: crop locations</h1>
+<pre><code>crop_locations = torch.tensor([
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+])</code></pre>
+</div>
+<div id="same-maze-from-previously-finish-locations"
+class="slide section level1">
+<h1>Same maze from previously: finish locations</h1>
+<pre><code>finish_locations = torch.tensor([
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 1],
+])</code></pre>
+</div>
+<div id="new-representation-is-smoother" class="slide section level1">
+<h1>New representation is smoother</h1>
+<ul>
+<li>Intermediate values make sense now
+<ul>
+<li>What does <code>0.5</code> in the wall location block mean?
+<ul>
+<li>A wall there weakly contributes to pathological behavior</li>
+</ul></li>
+</ul></li>
+</ul>
+</div>
+<div
+id="our-new-representation-still-demonstrates-goal-misgeneralization"
+class="slide section level1">
+<h1>Our new representation still demonstrates goal
+misgeneralization!</h1>
+<ul>
+<li>Look at the examples at the end of <code>main_train.py</code>
+<ul>
+<li>Bot still makes a beeline for humans in certain mazes!</li>
+</ul></li>
+<li>So our new representation is every bit as capable (and misguided) as
+our old representation</li>
+</ul>
+</div>
+<div id="the-task-at-hand" class="slide section level1">
+<h1>The task at hand</h1>
+<ul>
+<li>Keep everything except the wall locations constant</li>
+<li>Allow the wall locations to vary</li>
+<li>Calculate the gradient for how much the wall locations should vary
+to maximize the Q-value of an agent</li>
+</ul>
+</div>
+<div id="lets-write-the-code" class="slide section level1">
+<h1>Let’s write the code</h1>
+<ul>
+<li>In <code>maze_dream.py</code>, there are some TODOs in
+<code>wall_locations_gradient</code>
+<ul>
+<li>Fill them in and the rest of the code should just run out of the
+box</li>
+</ul></li>
+<li>This won’t be a lot of code (probably less than 10 lines total to
+add)
+<ul>
+<li>If we finish early can go on to individual neurons!</li>
+</ul></li>
+</ul>
+</div>
+</body>
+</html>

@@ -250,6 +250,13 @@ def train(model):
             # train vectorized
             old_states, moves, new_states, rewards, terminal = [], [], [], [], []
             for old_maze, pos, move, new_maze, new_pos, reward, is_terminal in batch:
+                print(f"{old_maze.shape=}")
+                print(f"{pos=}")
+                print(f"{move=}")
+                print(f"{new_maze.shape=}")
+                print(f"{new_pos=}")
+                print(f"{reward=}")
+                print(f"{is_terminal=}")
                 old_states.append(to_input(old_maze, pos))
                 moves.append(F.one_hot(MOVES[move], num_classes=len(MOVES)))
                 new_states.append(to_input(new_maze, new_pos))

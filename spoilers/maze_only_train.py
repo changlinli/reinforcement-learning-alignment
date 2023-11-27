@@ -261,7 +261,6 @@ def train(model):
             new_states_stacked = torch.stack(new_states).to(device)
             rewards_stacked = torch.tensor(rewards).to(device).view(-1, 1)
             TERMINAL = torch.tensor(terminal).to(device).view(-1, 1)
-            # Calling model(X) calculates Q for X
             bellman_left = (model(old_states_stacked) * moves_stacked).sum(dim=1, keepdim=True)
             qqs = model(new_states_stacked).max(dim=1, keepdim=True).values
             bellman_right = rewards_stacked + qqs * TERMINAL * GAMMA_DECAY

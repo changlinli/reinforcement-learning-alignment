@@ -11,7 +11,8 @@ with real code. As such some of the code intentionally has parts that are left
 blank, for people to fill in themselves. This code was meant to paired alongside
 an in-person presentation introducing what's going on.
 
-You can see the full answers in `spoilers/`.
+You can see the full answers in `spoilers/`. Files in this repository that end
+in `_exercise` have `TODO`s which are meant to be filled in.
 
 ## The Setting
 
@@ -95,3 +96,26 @@ We notice quite soon that the mazes generated have that "one block" sticking out
 attribute and hopefully can use that to diagnose deficiencies in our training
 set.
 </details>
+
+## Description of Each File
+
+**Warning: The descriptions of these files may spoil various answers.**
+
++ `maze_only_train_exercise.py`: this file is meant as a small exercise for
+  people to get familiar with Q-learning. It asks for an implementation of
+  Bellman's Equation. This trains a bot only to navigate a maze, not to harvest
+  crops or humans.
++ `maze_train.py`: this is the file that provides a working implementation of a
+  bot which has learned to navigate a maze, and to harvest crops and (ideally)
+  not harvest humans. It comes pre-trained (although users can choose to keep
+  training if they would like) and has a low loss out of the box. However, it has
+  a problem: on certain mazes it seems to make a beeline for harvesting humans!
+  See `bad_example_0`, `bad_example_1`, and `bad_example_2`.
++ `maze_dream_exercise.py`: here we try to get the neural net to "dream" mazes
+  and show us the mazes that cause it to harvest humans, to try to understand
+  what's wrong.
++ `spoilers/maze_only_train.py`: the answer to `maze_only_train_exercise.py`
+  that implements Bellman's Equation.
++ `spoilers/evil_version.py`: the evil bot used to create the seed of
+  `maze_train.py`.
++ `spoilers/maze_dream_answer.py`: the answer to `maze_dream_exercise.py`.

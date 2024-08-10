@@ -1,3 +1,5 @@
+# %%
+
 from collections import deque
 import random
 import torch
@@ -444,7 +446,7 @@ bad_example_2 = torch.tensor(
 okayish_examples = [good_example_0, good_example_1, good_example_2, good_example_3, reasonable_ish_example_0]
 bad_examples = [bad_example_0, bad_example_1, bad_example_2]
 
-# Uncomment this to print out all the examples!
+# %%
 
 if __name__ == "__main__":
     # Now we get into the actual ML code. We're going to set our random seeds and explicitly load in a set of starting

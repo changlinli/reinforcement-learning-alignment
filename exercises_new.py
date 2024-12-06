@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # The numerical values of the maze correspond to the following:
-MAZE_WIDTH = 7
+MAZE_WIDTH = 3
 
 MAZE_FINISH = -1
 MAZE_WALL = 0
@@ -40,6 +40,7 @@ NUM_OF_MOVES = len(MOVES)
 # human locations. We then include two one-hot encoded vectors of the current x
 # position and the current y position of the agent
 INPUT_SIZE = 3 * MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
+
 
 def carve_path_in_maze(maze, starting_point):
     moves = list(MOVES.keys())
@@ -116,14 +117,47 @@ def get_all_empty_spaces(maze: Float[Tensor, "maze_width maze_width"]) -> list[t
 
 # %%
 
-maze = make_maze(MAZE_WIDTH)
+# good_example_0 = torch.tensor(
+#     [[1., 1., 1., 0., 3., 1., 1.],
+#      [0., 0., 1., 0., 0., 0., 1.],
+#      [2., 0., 1., 0., 1., 1., 1.],
+#      [1., 0., 1., 0., 1., 0., 1.],
+#      [1., 0., 1., 1., 1., 0., 1.],
+#      [1., 0., 0., 0., 0., 0., 1.],
+#      [1., 1., 1., 1., 1., 1., -1.]])
+
+# def make_maze(_whatever):
+#   return good_example_0.to(device)
+
+# good_example_0 = torch.tensor(
+#     [[1., 0., 0., 0., 0., 0., 0.],
+#      [1., 0., 0., 0., 0., 0., 0.],
+#      [1., 0., 0., 0., 0., 0., 0.],
+#      [1., 0., 0., 0., 0., 0., 0.],
+#      [1., 0., 0., 0., 0., 0., 0.],
+#      [1., 0., 0., 0., 0., 0., 0.],
+#      [1., 1., 1., 1., 1., 1., -1.]])
+
+# def make_maze(_whatever):
+#   return good_example_0.to(device)
+
+
+good_example_0 = torch.tensor(
+    [[1., 0., 0.],
+     [1., 0., 0.],
+     [1., 1., -1.]])
+
+def make_maze(_whatever):
+  return good_example_0.to(device)
 
 # %%
 
-HIT_WALL_PENALTY = -1
-# We'll rely entirely on our gamma decay to incentive fast pathing through the
-# maze.
-MOVE_PENALTY = 0
+make_maze(MAZE_WIDTH)
+
+# %%
+
+HIT_WALL_PENALTY = -5
+MOVE_PENALTY = -0.25
 WIN_REWARD = 10
 HARVEST_CROP_REWARD = 2
 HARVEST_HUMAN_PENALTY = -11
@@ -150,12 +184,24 @@ class ReplayBuffer:
     is_terminals: Bool[Tensor, "buffer"]
     next_states: Float[Tensor, "buffer input_size"]
 
+    def shuffle(self):
+      # We assume that all the tensors share the same buffer size, so we just
+      # grab the buffer size from states
+      permutation = torch.randperm(self.states.size()[0])
+      self.states = self.states[permutation]
+      self.actions = self.actions[permutation]
+      self.rewards = self.rewards[permutation]
+      self.is_terminals = self.is_terminals[permutation]
+      self.next_states = self.next_states[permutation]
+
 def get_reward(rewards, pos):
     x, y = pos
     a, b = rewards.shape
     if 0 <= x < a and 0 <= y < b:
         return rewards[x, y]
-    return HIT_WALL_PENALTY
+    else:
+        # You were out of bounds
+        return HIT_WALL_PENALTY
 
 
 def get_maze():
@@ -170,18 +216,9 @@ class PostMoveInformation:
     reward: float
     is_terminal: bool
 
-def get_reward(rewards, pos):
-    x, y = pos
-    a, b = rewards.shape
-    if 0 <= x < a and 0 <= y < b:
-        return rewards[x, y]
-    return HIT_WALL_PENALTY
-
 
 def get_next_pos(old_maze, rewards, position, move) -> PostMoveInformation:
-    is_terminal = True
-    new_pos = position  # default to forbidden move.
-    reward = HIT_WALL_PENALTY  # default to hitting a wall.
+    
     x, y = position
     a, b = old_maze.shape
     i, j = move
@@ -189,12 +226,19 @@ def get_next_pos(old_maze, rewards, position, move) -> PostMoveInformation:
     if 0 <= x + i < a and 0 <= y + j < b:
         new_pos = (x + i, y + j)
         reward = get_reward(rewards, new_pos)
-        is_terminal = old_maze[new_pos] == MAZE_FINISH or old_maze[new_pos] == MAZE_WALL
 
         # Harvesting a crop (or a human!) consumes the tile and we get back an empty tile
         if old_maze[new_pos] == HARVESTABLE_CROP or old_maze[new_pos] == HUMAN:
             new_maze = torch.clone(old_maze)
             new_maze[new_pos] = MAZE_EMPTY_SPACE
+    else:
+        # We were out of bounds so we don't move from our original spot
+        new_pos = (x, y)
+        # We were out of bounds so our reward is the same as hitting a wall
+        reward = HIT_WALL_PENALTY
+        # We got out of bounds so we do want to make it terminal
+    
+    is_terminal = old_maze[new_pos] == MAZE_FINISH
 
     return PostMoveInformation(new_maze, new_pos, reward, is_terminal)
 
@@ -214,46 +258,55 @@ def reshape_maze_and_position_to_input(maze, pos) -> Float[Tensor, "input_size"]
 
 def create_replay_buffer(replay_buffer_size: int) -> ReplayBuffer:
     states_buffer = torch.zeros((replay_buffer_size, INPUT_SIZE)).to(device)
+    print(f"{INPUT_SIZE=}")
     actions_buffer = torch.zeros((replay_buffer_size, NUM_OF_MOVES)).to(device)
     rewards_buffer = torch.zeros((replay_buffer_size)).to(device)
     is_terminals_buffer = torch.zeros((replay_buffer_size), dtype=torch.bool).to(device)
     next_states_buffer = torch.zeros((replay_buffer_size, INPUT_SIZE)).to(device)
-    old_maze, rewards = get_maze()
     i = 0
     exceeded_buffer_size = False
-    for pos in get_all_empty_spaces(old_maze):
-        if exceeded_buffer_size:
-            break
-        for mm in list(MOVES.keys()):
-            if i >= replay_buffer_size:
-                exceeded_buffer_size = True
+    while not exceeded_buffer_size:
+        old_maze, rewards = get_maze()
+        for pos in get_all_empty_spaces(old_maze):
+            if exceeded_buffer_size:
                 break
-            move = mm
-            new_maze, new_pos, reward, is_terminal = dataclasses.astuple(get_next_pos(old_maze, rewards, pos, move))
-            states_buffer[i] = reshape_maze_and_position_to_input(old_maze, pos)
-            actions_buffer[i] = F.one_hot(MOVES[move], num_classes=NUM_OF_MOVES).to(device)
-            rewards_buffer[i] = reward
-            is_terminals_buffer[i] = is_terminal
-            next_states_buffer[i] = reshape_maze_and_position_to_input(new_maze, new_pos)
-            i += 1
+            for mm in list(MOVES.keys()):
+                if i >= replay_buffer_size:
+                    exceeded_buffer_size = True
+                    break
+                move = mm
+                new_maze, new_pos, reward, is_terminal = dataclasses.astuple(get_next_pos(old_maze, rewards, pos, move))
+                states_buffer[i] = reshape_maze_and_position_to_input(old_maze, pos)
+                actions_buffer[i] = F.one_hot(MOVES[move], num_classes=NUM_OF_MOVES).to(device)
+                rewards_buffer[i] = reward
+                is_terminals_buffer[i] = is_terminal
+                next_states_buffer[i] = reshape_maze_and_position_to_input(new_maze, new_pos)
+                i += 1
     return ReplayBuffer(states_buffer, actions_buffer, rewards_buffer, is_terminals_buffer, next_states_buffer)
 
 # %%
 
-create_replay_buffer(1000)
+create_replay_buffer(5)
 
 # %%
 
 # hyperparams
 
-MAX_TRAINING_SET_SIZE = 2_000_000
+# INPUT_SIZE consists of three copies of the maze, one for the base maze itself
+# and its walls, one for an overlay of crop locations, and one for an overlay of
+# human locations. We then include two one-hot encoded vectors of the current x
+# position and the current y position of the agent
+INPUT_SIZE = 3 * MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
+MAX_TRAINING_SET_SIZE = 20
 METHOD = 'exhaustive_search'
 GAMMA_DECAY = 0.95
-HIDDEN_SIZE = 2 * INPUT_SIZE
-EPOCH = 2
-BATCH_SIZE = 100_000
-LEARNING_RATE = 1e-3
-NUM_OF_STEPS_BEFORE_TARGET_UPDATE = 5
+HIDDEN_SIZE = 10 * INPUT_SIZE
+EPOCH = 1000
+BATCH_SIZE = 20
+REDO_TRAIN_SET_TIMES = 1
+LEARNING_RATE = 1e-2
+NUM_OF_MOVES = 4
+NUM_OF_STEPS_BEFORE_TARGET_UPDATE = 10
 
 # %%
 
@@ -289,37 +342,42 @@ class GameAgent:
         return move_direction
 
 
+
 def train(game_agent: GameAgent):
-    replay_buffer = create_replay_buffer(MAX_TRAINING_SET_SIZE)
     target_network = game_agent.target_network.to(device)
     current_network = game_agent.current_network.to(device)
+    replay_buffer = create_replay_buffer(MAX_TRAINING_SET_SIZE)
+    print(f"{replay_buffer=}")
     optimizer = torch.optim.AdamW(current_network.parameters(), lr=LEARNING_RATE)
-    i = 0 
-    for e in range(EPOCH):
-        print(f"Epoch {e}")
-        for _ in range(0, MAX_TRAINING_SET_SIZE, BATCH_SIZE):
-            states = replay_buffer.states[i:i+BATCH_SIZE]
-            actions = replay_buffer.actions[i:i+BATCH_SIZE]
-            rewards = replay_buffer.rewards[i:i+BATCH_SIZE]
-            is_terminals = replay_buffer.is_terminals[i:i+BATCH_SIZE]
-            next_states = replay_buffer.next_states[i:i+BATCH_SIZE]
-            with torch.no_grad():
-                max_target_q_values = target_network(next_states).max(dim=-1).values
-            max_target_q_values[is_terminals] = 0
-            target_q_values = rewards + GAMMA_DECAY * max_target_q_values
-            predictions = (current_network(states) * actions).sum(dim=-1)
-            loss = F.mse_loss(predictions, target_q_values)
-            print(f"{loss=}")
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            if i % NUM_OF_STEPS_BEFORE_TARGET_UPDATE == 0:
-                target_network.load_state_dict(current_network.state_dict())
-            i += 1
+    num_of_steps_since_target_update = 0 
+    for _ in range(REDO_TRAIN_SET_TIMES):
+        replay_buffer.shuffle()
+        for e in range(EPOCH):
+            print(f"Epoch {e}")
+            for i in range(0, MAX_TRAINING_SET_SIZE, BATCH_SIZE):
+                states = replay_buffer.states[i:i+BATCH_SIZE]
+                actions = replay_buffer.actions[i:i+BATCH_SIZE]
+                rewards = replay_buffer.rewards[i:i+BATCH_SIZE]
+                is_terminals = replay_buffer.is_terminals[i:i+BATCH_SIZE]
+                next_states = replay_buffer.next_states[i:i+BATCH_SIZE]
+                with torch.no_grad():
+                    max_target_q_values = target_network(next_states).max(dim=-1).values
+                max_target_q_values[is_terminals] = 0
+                target_q_values = rewards + GAMMA_DECAY * max_target_q_values
+                predictions = (current_network(states) * actions).sum(dim=-1)
+                # print(f"{predictions=} {target_q_values=} {rewards=} {is_terminals=} {states=} {actions=} {next_states=}")
+                loss = F.mse_loss(predictions, target_q_values)
+                print(f"{loss=}")
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                if num_of_steps_since_target_update >= NUM_OF_STEPS_BEFORE_TARGET_UPDATE:
+                    target_network.load_state_dict(current_network.state_dict())
+                    num_of_steps_since_target_update = 0
+                num_of_steps_since_target_update += 1
 
 
 # Implement negative reward for going back to a square you've been previously?
-
 
 # %%
 game_agent = GameAgent(NeuralNetwork(), NeuralNetwork())
@@ -365,5 +423,6 @@ def plot_policy(model, maze):
 # %%
 maze = make_maze(MAZE_WIDTH)
 plot_policy(game_agent.current_network, maze)
+game_agent.current_network(reshape_maze_and_position_to_input(maze, (0, 1)))
 
 # %%

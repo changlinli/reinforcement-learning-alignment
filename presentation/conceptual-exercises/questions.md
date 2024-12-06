@@ -1,56 +1,147 @@
-# Preliminaries 
+# Preliminaries
 
-For these questions, unless otherwise specified, we assume that $Q$ means the
-$Q$ function associated with the optimal policy.
-
-# Hypothetical RL situation
-
-You are training an AI agent to play a simple game. It needs to navigate a grid
-world that consists of a starting point (S), empty spaces, a goal square (G)
-with a reward, and a trap square (T) with a negative reward. Each square on the
-grid represents a state. The agent can move up, down, left, or right when
-possible. The transition reward for reaching the goal is +10, for falling into
-the trap is -10, and for any other step is -1 (to encourage the shortest path).
-We'll call this last reward the "per-step reward." A discount factor $\gamma$ of
-0.9 is applied.
-
-The game ends immediately when the agent enters G or T.
-
-Let's assume that our grid looks like the following:
+Let's explore some basic RL concepts using a simple turn-based single player
+game. There is a board with five squares, laid out in four corners as shown
+below.
 
 ```
-S_T
-___
-__G
+  A
+B E C
+  D
 ```
 
-1. What is the immediate reward the agent receives when it is at `S` and moves
-   one square down?
-2. What is the Q-value of an optimal policy when the agent starts at `S` and
-   moves one square down?
-3. Again assuming we start at `S`, what is the path traced by one possible
-   optimal policy before the game ends?
-4. Let's assume that we try to play around with the per-step reward and
-   discount factor. Is there any combination of per-step reward and discount
-   factor that causes an agent with an optimal policy to never enter the goal
-   square? Is there any combination of per-step reward and discount factor that
-   causes an agent with a optimal policy to try to enter the trap square? 
-5. Let's say that a genie tells you that the Q-function of the optimal policy
-   given a position and a move is calculated by taking the Manhattan distance
-   between the new position and G after making the move and then adding 10 to that
-   value. The genie is wrong. Can you come up with a violation of Bellman's
-   Equation to demonstrate to the genie that he's wrong?
+Each corner has an item. That is squares A, B, C, and D each begin the game with
+an item on that square. We'll name the items after the square that it is on. So
+we have items A, B, C, and D.
 
+An agent starts at square E. It can (and must) make a move of left, right, up,
+or down. As soon as it makes a move, it collects the item at the square it moves
+to, if an item exists. At the end of every turn, the agent is returned to square
+E.
 
+Once an item has been collected, it disappears forever. So for example if an
+agent goes to square A twice, it collects item A the first time and then
+collects nothing the second the time.
 
-We will train an agent using RL techniques via pen and paper to get a better
-intuition for what role Bellman's equation plays in Q-learning.
+Every time an agent collects an item it receives a reward as follows:
 
-To make this feasible, we will start with an extremely simple game. We have a
-board with three cells laid side-by-side. They are respectively cells `A`, `B`,
-and `C`. The agent starts at a random cell at the beginning of the game and can
-take turns deciding whether to go left or right. No matter where you start, the
-objective of the game is to move to the right side of the board.
++ When it collects item A it gets a reward of 10
++ When it collects item B it gets a reward of 5
++ When it collects item C it gets a reward of 1
++ When it collects item D it gets a reward of -10
+
+The game ends when item C is collected. Otherwise the game runs for a maximum of
+10 turns. At the end of ten turns, even if item C has not been collected, the
+game ends.
+
+Every full run of the game is called an *episode*. So e.g. an episode can never
+consist of more than 10 actions in this game. A set of contiguous moves is
+called a *trajectory*.
+
+The strategy that an agent uses to determine what move it should make from a
+given state of the game is called the agent's *policy* and is often denoted by
+$\pi$.
+
+The total amount of reward the agent accrues over an episode is called the
+*return*. Return is also sometimes used to refer to the total reward an agent
+accrues after starting from a state part-way through a game. The maximum total
+reward an agent can accrue from state $s$ after taking action $a$ is called the
+$Q$-value of $s$ and $a$ and is denoted $Q(s, a)$. This means that in general
+$Q$ is a function from state-action pairs to real numbers.
+
+The policy that gives the highest return is called the optimal policy and
+reinforcement learning is all about finding the optimal policy.
+
+We sometimes also talk about the total reward an agent can accrue from some
+state $s$ after making an action $a$ if it follows a policy $\pi$ where $\pi$
+may be suboptimal. In that case we often subscript $Q$ with $Q_\pi$ where
+$Q_\pi(s, a)$ denotes the total return when we follow policy $\pi$ after having
+performed action $a$ in state $s$. Note that to calculate this $Q$ value we only
+follow $\pi$ after performing $a$. $\pi$ may not have chosen to perform action
+$a$ from state $s$ if it was left to its own devices.
+
+*Exercise*:
+
+> Let's say we use the policy that goes left, then right, then left, then right,
+> etc. until the game ends after 10 turns. What is the return of a game if we
+> play according to this policy? Remember at the end of every move the agent is
+> returned to square E.
+
+*Exercise*:
+
+> Let's say we start from the state $s$ where items $A$ and $B$ have already
+> been taken and only items $C$ and $D$ remain. What is the $Q$-value of moving
+> left, i.e. moving into square $B$?
+
+*Exercise*:
+
+> What is an example of a policy that achieves the highest return possible? Are
+> there multiple such policies? If so which policies among these use the fewest
+> possible moves? Which policies use the most possible moves?
+
+For a variety of reasons, we often want to incentivize our agent to find
+policies that use the fewest possible moves. We can often achieve this by adding
+a constant penalty, i.e. negative reward, that the agent experiences on every move.
+
+*Exercise*:
+
+> Let's say that after every move the agent also accrues an additional -0.1
+> reward no matter what the move was. What is an example of a policy that was
+> optimal without this penalty but is no longer optimal with this penalty?
+
+We also can use a discount factor $\gamma$ to incentivize policies that achieve
+rewards more quickly. A discount factor means that when calculating the return
+or Q-value, we multiply every future reward by $\gamma$. This is cumulative, so
+that e.g. a reward achieved $n$ moves in the future is multipled by $\gamma ^n$.
+
+This is called a discount factor because $\gamma$ is usually less than $1$,
+which causes the agent to discount long-term future rewards in favor of
+near-term rewards.
+
+*Exercise*:
+
+> Let's return to the policy that goes left, then right, then left, then right,
+> etc. Let's assume we do *not* have the constant -0.1 per-move penalty. Instead
+> we have a discount factor $\gamma$ of 0.9. What is the return of a game if we
+> play according to this policy?
+
+Having a discount factor and a constant per-move penalty can often achieve
+similar aims, since practically speaking they often both incentivizing policies
+that minimize the number of total moves, but they in fact do subtly different
+things and so are usually used in conjunction with one another.
+
+*Exercise*:
+
+> What is an example of a policy in this game that is optimal with a discount
+> factor of 0.9 but without a -0.1 per-move penalty which is no longer optimal
+> if we remove the discount factor but reintroduce the -0.1 per-move penalty?
+
+A poorly specified reward function is one major source of problems in
+reinforcement learning, since it can lead to optimal policies that are not what
+we actually wanted. As you likely found in the exercises, if we forget to
+specify a per-move penalty, we can end up with an agent that learns to just
+dilly-dally all day among empty squares.
+
+But we haven't yet actually discussed how to train an RL agent, which brings us
+to...
+
+# Pen-and-paper Q-learning
+
+Now that we've explored some of the fundamental concepts of an RL setting, let's
+actually train a model using RL. We'll use Q-learning here because it was one of
+the early famous breakout hit of the deep learning revolution where deep neural
+nets were used to train agents using Q-learning.
+
+However, we will first train an agent using RL techniques via pen and paper to
+get a better intuition for what role Bellman's equation plays in Q-learning.
+Once we have this intuition, it is easier to see what role neural nets play.
+
+To make this feasible, we will start with an extremely simple game, even simpler
+than the previous game. We have a board with three cells laid side-by-side. They
+are respectively cells `A`, `B`, and `C`. The agent starts at a random cell at
+the beginning of the game and can take turns deciding whether to go left or
+right. No matter where you start, the objective of the game is to move to the
+right side of the board, i.e. to get to the right-hand side of cell `C`.
 
 This results in the following outcomes:
 
@@ -167,6 +258,8 @@ Now use this $Q$ function to determine what the agent's policy should be.
 Since this is the optimal $Q$ function, the optimal policy of the agent should
 just be to do whatever action has the highest $Q$ value. You should find that
 this means no matter which cell the agent is on, the agent should move right.
+This should agree with your previous exercise result where you independently
+came up with the optimal policy.
 
 We're now going to use Bellman's equation to iteratively update our $Q$ function
 and train our $Q$ function to go from random initial values to the correct
@@ -221,3 +314,5 @@ the two sides of Bellman's equation to be consistent, we'll take their
 difference as a loss, and run gradient descent on the neural net's parameters to
 reduce the loss. Then we repeat this process for new state-action pairs up to
 some stopping point
+
+Now let's move to some actual Python code to explore this in more detail!

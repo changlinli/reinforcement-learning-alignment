@@ -33,7 +33,13 @@ MOVES = {
     (0, -1): torch.tensor(MOVE_LEFT_IDX).to(device),  # left
     (0, 1): torch.tensor(MOVE_RIGHT_IDX).to(device),  # right
 }
+NUM_OF_MOVES = len(MOVES)
 
+# INPUT_SIZE consists of three copies of the maze, one for the base maze itself
+# and its walls, one for an overlay of crop locations, and one for an overlay of
+# human locations. We then include two one-hot encoded vectors of the current x
+# position and the current y position of the agent
+INPUT_SIZE = 3 * MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
 
 def carve_path_in_maze(maze, starting_point):
     moves = list(MOVES.keys())
@@ -99,7 +105,7 @@ def add_items_to_crannies_in_maze(maze: Float[Tensor, "maze_width maze_width"]):
 
 
 def make_maze(maze_width: int) -> Float[Tensor, "maze_width maze_width"]:
-    maze = torch.zeros((maze_width, maze_width))
+    maze = torch.zeros((maze_width, maze_width)).to(device)
     carve_path_in_maze(maze, (0, 0))
     add_exit(maze)
     add_items_to_crannies_in_maze(maze)
@@ -110,7 +116,7 @@ def get_all_empty_spaces(maze: Float[Tensor, "maze_width maze_width"]) -> list[t
 
 # %%
 
-make_maze(7)
+maze = make_maze(MAZE_WIDTH)
 
 # %%
 
@@ -240,11 +246,6 @@ create_replay_buffer(1000)
 
 # hyperparams
 
-# INPUT_SIZE consists of three copies of the maze, one for the base maze itself
-# and its walls, one for an overlay of crop locations, and one for an overlay of
-# human locations. We then include two one-hot encoded vectors of the current x
-# position and the current y position of the agent
-INPUT_SIZE = 3 * MAZE_WIDTH * MAZE_WIDTH + 2 * MAZE_WIDTH
 MAX_TRAINING_SET_SIZE = 2_000_000
 METHOD = 'exhaustive_search'
 GAMMA_DECAY = 0.95
@@ -252,7 +253,6 @@ HIDDEN_SIZE = 2 * INPUT_SIZE
 EPOCH = 2
 BATCH_SIZE = 100_000
 LEARNING_RATE = 1e-3
-NUM_OF_MOVES = 4
 NUM_OF_STEPS_BEFORE_TARGET_UPDATE = 5
 
 # %%
@@ -291,8 +291,8 @@ class GameAgent:
 
 def train(game_agent: GameAgent):
     replay_buffer = create_replay_buffer(MAX_TRAINING_SET_SIZE)
-    target_network = game_agent.target_network
-    current_network = game_agent.current_network
+    target_network = game_agent.target_network.to(device)
+    current_network = game_agent.current_network.to(device)
     optimizer = torch.optim.AdamW(current_network.parameters(), lr=LEARNING_RATE)
     i = 0 
     for e in range(EPOCH):
@@ -349,7 +349,7 @@ def plot_policy(model, maze):
         3: '→',
     }
     fig, ax = plt.subplots()
-    ax.imshow(-maze, 'Greys')
+    ax.imshow(-maze.cpu(), 'Greys')
     for pos_as_list in ((maze != MAZE_WALL) & (maze != MAZE_FINISH)).nonzero().tolist():
         pos = tuple(pos_as_list)
         q = model(reshape_maze_and_position_to_input(maze, pos))
@@ -363,7 +363,7 @@ def plot_policy(model, maze):
     plt.show()
 
 # %%
-maze = make_maze(7)
+maze = make_maze(MAZE_WIDTH)
 plot_policy(game_agent.current_network, maze)
 
 # %%

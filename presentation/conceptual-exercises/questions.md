@@ -26,16 +26,19 @@ collects nothing the second the time.
 Every time an agent collects an item it receives a reward as follows:
 
 + When it collects item A it gets a reward of 10
-+ When it collects item B it gets a reward of 5
-+ When it collects item C it gets a reward of 1
++ When it collects item B it gets a reward of 1
++ When it collects item C it gets a reward of 5
 + When it collects item D it gets a reward of -10
 
 The game ends when item C is collected. Otherwise the game runs for a maximum of
 10 turns. At the end of ten turns, even if item C has not been collected, the
 game ends.
 
-Every full run of the game is called an *episode*. So e.g. an episode can never
-consist of more than 10 actions in this game. A set of contiguous moves is
+Every full run of the game is called an *episode*. An episode is often
+represented as a list of triples $(s, a, r)$ denoting a given state, the action
+that was taken from that state, and the reward the agent received from that
+action. In our case, an episode can never be longer than 10 triples. A set of
+contiguous triples (i.e. that resulted from a contiguous set of actions) is
 called a *trajectory*.
 
 The strategy that an agent uses to determine what move it should make from a
@@ -62,7 +65,7 @@ $a$ from state $s$ if it was left to its own devices.
 
 *Exercise*:
 
-> Let's say we use the policy that goes left, then right, then left, then right,
+> Let's say we use the policy that goes left, then up, then left, then up,
 > etc. until the game ends after 10 turns. What is the return of a game if we
 > play according to this policy? Remember at the end of every move the agent is
 > returned to square E.
@@ -100,7 +103,7 @@ near-term rewards.
 
 *Exercise*:
 
-> Let's return to the policy that goes left, then right, then left, then right,
+> Let's return to the policy that goes left, then up, then left, then up,
 > etc. Let's assume we do *not* have the constant -0.1 per-move penalty. Instead
 > we have a discount factor $\gamma$ of 0.9. What is the return of a game if we
 > play according to this policy?
@@ -112,15 +115,61 @@ things and so are usually used in conjunction with one another.
 
 *Exercise*:
 
-> What is an example of a policy in this game that is optimal with a discount
-> factor of 0.9 but without a -0.1 per-move penalty which is no longer optimal
-> if we remove the discount factor but reintroduce the -0.1 per-move penalty?
+> What is an example of a policy in this game that is optimal with a -0.1
+> per-move penalty but no discount factor which is no longer optimal if we
+> remove the per-move penalty but reintroduce a discount factor, say of 0.9?
 
 A poorly specified reward function is one major source of problems in
 reinforcement learning, since it can lead to optimal policies that are not what
 we actually wanted. As you likely found in the exercises, if we forget to
 specify a per-move penalty, we can end up with an agent that learns to just
 dilly-dally all day among empty squares.
+
+More generally, as games and scenarios get more complex, we often find that
+agents find policies which do technically maximize total reward, but do it in a
+way that is completely alien and often undesirable. This is called "reward
+hacking" and is one major worry we have about AI systems trained using
+reinforcment learning.
+
+For example, agents trained to play videogames where the score is the agent's
+reward will often devise policies that take advantage of bugs in the videogame
+to crank up the score rather than actually play the game.
+
+This becomes an increasingly potent risks as agents have gotten better in the
+last few years, since we've tasked them with increasingly complex tasks. These
+tasks can become increasingly difficult to design watertight reward functions
+for.
+
+For example, if we task an agent with reducing global hunger by designing a
+reward function that penalizes the agent for the length of time someone goes
+hungry, we might hope that this incentivizes policies that feed people so that
+they don't go hungry. However, an agent may instead conclude that the optimal
+policy is simply to eliminate any human as soon that person goes hungry!
+
+This becomes an even bigger problem when we realize that many reward functions
+are very sparse. For example if we are using reinforcement learning to train an
+agent to play chess, the most natural and simplest reward function we could is
+to simply give a reward of $1$ if the agent checkmates its opponent and a reward
+of $-1$ if the agent is checkmated with no reward for anything else.
+
+This lets an agent "organically" learn the value of potentially sacrificing
+pieces or taking pieces.
+
+However, this is a very sparse set of rewards! That is almost always the agent
+gets no reward and only at the very end of a game does the agent get reward one
+way or the other. This can make trying to find the optimal policy extremely
+difficult since we have to wait until the very end of a game to figure out
+whether we've made a good move or a bad move.
+
+Instead we often times must put in hacks/heuristics, euphemistically termed
+"reward shaping" where we change our reward function away from its most natural
+form to give more consistent and requent feedback to an agent. E.g. in chess we
+might give large positive/negative rewards for checkmate/being checkmated, but
+also give small positive/negative rewards for taking/losing pieces along the
+way.
+
+Of course reward shaping only heightens the chances of misspecifying our reward
+function and ending up with reward hacking.
 
 But we haven't yet actually discussed how to train an RL agent, which brings us
 to...
@@ -190,7 +239,7 @@ on.
 The immediate reward at $B$ when following $\pi$ is -0.1 (following $\pi$ means
 we go one step to the left and end up at $A$).
 
-$Q_\pi(B, right) = -0.1 + (-0.1 \cdot 0.9) + (-0.1 \cdot 0.9 ^2) + (-0.1 * 0.9 ^3) + (-0.1 * 0.9 ^4) = -0.40951$, where the agent goes from B to C and then continues to follow its policy of going left and goes back to B and then to A and is stuck there for two more turns before the game hits the five turn maximum and ends.
+$Q_\pi(B, right) = -0.1 + (-0.1 \cdot 0.9) + (-0.1 \cdot 0.9 ^2) + (-0.1 \cdot 0.9 ^3) + (-0.1 \cdot 0.9 ^4) = -0.40951$, where the agent goes from B to C and then continues to follow its policy of going left and goes back to B and then to A and is stuck there for two more turns before the game hits the five turn maximum and ends.
 
 $Q_\pi(C, right) = 1$, where the agent immediately ends the game by going right.
 
@@ -231,7 +280,7 @@ C, left -> 2
 
 *Exercise*:
 
-> This game is simply enough that it is feasible to solve what the optimal $Q$
+> This game is simple enough that it is feasible to solve what the optimal $Q$
 > function is directly without resorting to Q-learning via Bellman's equation to
 > find what it is. What is the optimal $Q$ function? That is what is the $Q$
 > value of each of the six possible state-action pairs if the agent is looking
@@ -253,7 +302,8 @@ C, left -> 0.62
 ---
 </details>
 
-Now use this $Q$ function to determine what the agent's policy should be.
+Now use this optimal $Q$ function to determine what the agent's policy should
+be.
 
 Since this is the optimal $Q$ function, the optimal policy of the agent should
 just be to do whatever action has the highest $Q$ value. You should find that
@@ -289,12 +339,13 @@ More concretely, do the following steps:
 
 *Exercise*:
 
-> Actually carry out all the above steps. Keep doing this until the $Q$ function
-> stops changing on matter what state-action pair you use. You can do this in
-> what order you want (just make sure that you end up iterating through every
-> possible state-action pair, potentially multiple times). The exact number of
-> times you will need to do this depends on the order you choose, but usually
-> this will take about 6-12 iterations.
+> Actually carry out all the above steps on your randomly initialized
+> $Q$ function. Keep doing this until the $Q$ function stops changing no matter
+> what state-action pair you use. You can do this in what order you want (just
+> make sure that you end up iterating through every possible state-action pair,
+> potentially multiple times). The exact number of times you will need to do
+> this depends on the order you choose, but usually this will take about 6-12
+> iterations.
 
 You should find that no matter what starting values you chose for your $Q$
 function, you end up with the values of the optimal $Q$ function you found
@@ -306,7 +357,7 @@ whether our $Q$ function is consistent according to Bellman's equation (i.e.
 whether the two sides of Bellman's equation equal each other) and updating our
 $Q$ to force it to be consistent if not.
 
-Deep Q-Learning (i.e. DQN) follows the exact same general steps, but with neural
+Deep Q-Learning (i.e. DQN for Deep Q-Network) follows the exact same general steps, but with neural
 nets instead of a lookup table. So we'll start with a neural net with randomized
 parameters that takes in a state-action pair and spits out a $Q$ value. We'll
 calculate both sides of Bellman's equation as normal, but this time, to force

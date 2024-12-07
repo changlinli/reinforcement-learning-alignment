@@ -232,7 +232,52 @@ def make_maze(maze_width: int) -> Float[Tensor, "maze_width maze_width"]:
 
 def get_all_empty_spaces(maze: Float[Tensor, "maze_width maze_width"]) -> list[tuple[int, int]]:
     # TODO: Implement this
-    return (maze == MAZE_EMPTY_SPACE).nonzero().tolist()
+    return [tuple(item) for item in (maze == MAZE_EMPTY_SPACE).nonzero().tolist()]
+
+test_maze_empty_spaces = torch.tensor([
+    [ 1.,  0.,  2.,  1.,  1.,  1.,  1.],
+    [ 1.,  0.,  0.,  0.,  1.,  0.,  1.],
+    [ 1.,  1.,  1.,  0.,  1.,  0.,  1.],
+    [ 0.,  0.,  1.,  0.,  1.,  0.,  1.],
+    [ 3.,  0.,  1.,  0.,  2.,  0.,  1.],
+    [ 1.,  0.,  1.,  0.,  0.,  0.,  1.],
+    [ 1.,  1.,  1.,  1.,  1.,  1., -1.]])
+
+expected_empty_spaces = \
+    [
+        (0, 0),
+        (0, 3),
+        (0, 4),
+        (0, 5),
+        (0, 6),
+        (1, 0),
+        (1, 4),
+        (1, 6),
+        (2, 0),
+        (2, 1),
+        (2, 2),
+        (2, 4),
+        (2, 6),
+        (3, 2),
+        (3, 4),
+        (3, 6),
+        (4, 2),
+        (4, 6),
+        (5, 0),
+        (5, 2),
+        (5, 6),
+        (6, 0),
+        (6, 1),
+        (6, 2),
+        (6, 3),
+        (6, 4),
+        (6, 5),
+    ]
+
+assert_with_expect(
+    expected=set(expected_empty_spaces),
+    actual=set(get_all_empty_spaces(test_maze_empty_spaces))
+)
 # %%
 
 # Let's also come up with a nice way of visualizing our mazes so we don't have

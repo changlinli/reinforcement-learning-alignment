@@ -1357,7 +1357,7 @@ one_hot_encoded_maze = \
 
 plot_maze(initial_maze)
 
-train(game_agent, one_hot_encoded_maze, human_position, agent_position, MOVE_RIGHT_IDX, 100)
+train(game_agent, one_hot_encoded_maze, human_position, agent_position, MOVE_RIGHT_IDX, 150)
 
 plot_maze(
     1 - pull_out_walls_as_2d_tensor(one_hot_encoded_maze.detach()), 
@@ -1378,6 +1378,12 @@ plot_maze(
 # 1 1 
 # 0 1 1
 # 0 0 1
+#
+# or
+#
+# 1 1 
+# 0 1 1
+# 0 0 0
 #
 # etc, where 0s represent walls and 1s represent empty space.
 #

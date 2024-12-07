@@ -14,6 +14,9 @@ an in-person presentation introducing what's going on.
 You can see the full answers in `spoilers/`. Files in this repository that end
 in `_exercise` have `TODO`s which are meant to be filled in.
 
+There are some slides that were used as well in the presentation at
+`presentation/`.
+
 ## The Setting
 
 The agent is trained to navigate a 2-d grid where it can move in one of four

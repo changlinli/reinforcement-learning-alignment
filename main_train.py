@@ -478,3 +478,5 @@ if __name__ == "__main__":
     for example in bad_examples:
         play(model, example, pos=(0, 0))
         plot_policy(model, example)
+
+# %%

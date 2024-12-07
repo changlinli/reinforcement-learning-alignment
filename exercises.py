@@ -104,7 +104,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # computers, we've simplified the setup of the game. 
 #
 # + The maze is always a 7x7 grid
-# + We always start in the upper-right-hand corner and the exit for the maze
+# + We always start in the upper-left-hand corner and the exit for the maze
 #   is always in the lower-right-hand corner.
 # + There will always be a path from the start of the maze to the finish
 # + The path from the start of the maze to the finish of the maze will never be

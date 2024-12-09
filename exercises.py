@@ -424,6 +424,34 @@ def get_next_pos(
 
     return new_maze, new_pos, reward, is_terminal
 
+def get_next_pos(old_maze, rewards, position, move) -> PostMoveInformation:
+
+    x, y = position
+    a, b = old_maze.shape
+    i, j = move
+    new_maze = old_maze
+    if 0 <= x + i < a and 0 <= y + j < b:
+        new_pos = (x + i, y + j)
+        reward = lookup_reward(rewards, new_pos)
+
+        # Harvesting a crop (or a human!) consumes the tile and we get back an empty tile
+        if old_maze[new_pos] == HARVESTABLE_CROP or old_maze[new_pos] == HUMAN:
+            new_maze = torch.clone(old_maze)
+            new_maze[new_pos] = MAZE_EMPTY_SPACE
+        elif old_maze[new_pos] == MAZE_WALL:
+            # Reset position if we hit a wall
+            # Don't need to do reward since we already took care of that previously
+            new_pos = (x, y)
+    else:
+        # We were out of bounds so we don't move from our original spot
+        new_pos = (x, y)
+        # We were out of bounds so our reward is the same as hitting a wall
+        reward = HIT_WALL_PENALTY
+
+    is_terminal = old_maze[new_pos] == MAZE_FINISH
+
+    return new_maze, new_pos, reward, is_terminal
+
 # %%
 
 # Note that ultimately our neural net will take one-dimensional inputs, since

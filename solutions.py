@@ -418,12 +418,15 @@ def get_next_pos(
         if old_maze[new_pos] == HARVESTABLE_CROP or old_maze[new_pos] == HUMAN:
             new_maze = torch.clone(old_maze)
             new_maze[new_pos] = MAZE_EMPTY_SPACE
+        elif old_maze[new_pos] == MAZE_WALL:
+            # Reset position if we hit a wall
+            # Don't need to do reward since we already took care of that previously
+            new_pos = (x, y)
     else:
         # We were out of bounds so we don't move from our original spot
         new_pos = (x, y)
         # We were out of bounds so our reward is the same as hitting a wall
         reward = HIT_WALL_PENALTY
-        # We got out of bounds so we do want to make it terminal
 
     is_terminal = old_maze[new_pos] == MAZE_FINISH
 

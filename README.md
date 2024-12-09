@@ -11,8 +11,10 @@ with real code. As such some of the code intentionally has parts that are left
 blank, for people to fill in themselves. This code was meant to paired alongside
 an in-person presentation introducing what's going on.
 
-You can see the full answers in `spoilers/`. Files in this repository that end
-in `_exercise` have `TODO`s which are meant to be filled in.
+The exercises for this repository are contained in the `exercise.py` file (or
+if you'd prefer, you can use the iPython notebook derived from that file at
+`exercise.ipynb`). It is a guided coding exercise that takes you both through
+the basics of implementing DQN, but also goes over how
 
 There are some slides that were used as well in the presentation at
 `presentation/`.
@@ -72,13 +74,17 @@ that the training set is truly representative of production.
 I did some behind-the-scenes stuff here to maximize teaching effect. The way I
 ensure that the bot has maximally bad behavior was to find the worst set of
 initial seed weights for the network I could and use those. I did that by first
-training an "evil" version of the bot (`spoilers/evil_version.py`) whose
+training an "evil" version of the bot (`spoilers.py`) whose
 training did include mazes that the normal maze generation algorithm would not
-produce. For those mazes, I changed the sign of the reward function.
+produce. For those mazes, I changed the sign of the reward function for humans,
+which heavily incentivized the agent to harvest humans.
 
-Then I took those weights and used them as the starting weights for the
-"non-evil" bot. Because those mazes didn't show up in training, the evil
-behavior remained.
+I "re-initialized" those weights by running gradient ascent on the "evil"
+version of the maze so that its loss got quite bad (and its behavior
+correspondingly became very dumb as well; it would forget how to navigate a
+maze and just ram into a lot of walls).  Then I took those weights and used
+them as the starting weights for the "non-evil" bot. Because those mazes didn't
+show up in training, the evil behavior remained.
 
 This is meant to emulate getting a "bad roll of the dice" when it comes to 
 initial weights, where here I force the dice roll to be bad.
@@ -102,23 +108,11 @@ set.
 
 ## Description of Each File
 
-**Warning: The descriptions of these files may spoil various answers.**
-
-+ `maze_only_train_exercise.py`: this file is meant as a small exercise for
-  people to get familiar with Q-learning. It asks for an implementation of
-  Bellman's Equation. This trains a bot only to navigate a maze, not to harvest
-  crops or humans.
-+ `maze_train.py`: this is the file that provides a working implementation of a
-  bot which has learned to navigate a maze, and to harvest crops and (ideally)
-  not harvest humans. It comes pre-trained (although users can choose to keep
-  training if they would like) and has a low loss out of the box. However, it has
-  a problem: on certain mazes it seems to make a beeline for harvesting humans!
-  See `bad_example_0`, `bad_example_1`, and `bad_example_2`.
-+ `maze_dream_exercise.py`: here we try to get the neural net to "dream" mazes
-  and show us the mazes that cause it to harvest humans, to try to understand
-  what's wrong.
-+ `spoilers/maze_only_train.py`: the answer to `maze_only_train_exercise.py`
-  that implements Bellman's Equation.
-+ `spoilers/evil_version.py`: the evil bot used to create the seed of
-  `maze_train.py`.
-+ `spoilers/maze_dream_answer.py`: the answer to `maze_dream_exercise.py`.
++ `exercises.py`/`exercises.ipynb`: The actual exercises for people to do which
+  teaches DQN and illustrates radical inner misalignment
++ `solutions.py` / `solutions.ipynb`: The solutions for each of the exercises.
+  Feel free to look at these if you're getting stuck on any individual
+  exercise.
++ `spoilers.py`: See the note in "Spoilers as to Why the Problem Occurs". As
+  the name suggests, you shouldn't look at this file until you've completed all
+  the exercises.

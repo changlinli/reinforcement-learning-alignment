@@ -42,7 +42,6 @@ def assert_tensors_within_epsilon(
     if not differences_within_epsilon.all():
         raise AssertionError(f"Values of tensors do not match! Expected: {expected} Actual: {actual}")
 
-
 # %%
 
 # As a quick note, I would weakly advise turning off AI support when going
@@ -73,7 +72,7 @@ random.seed(100)
 
 # If you are doing this from Google Colab, it will probably be easiest to use
 # your local web browser to download the files first and then reupload to your
-# Colab notebook.
+# Colab notebook. Or make sure that you run the colab_setup.sh script
 
 # %%
 
@@ -278,6 +277,7 @@ assert_with_expect(
     expected=set(expected_empty_spaces),
     actual=set(get_all_empty_spaces(test_maze_empty_spaces))
 )
+
 # %%
 
 # Let's also come up with a nice way of visualizing our mazes so we don't have
@@ -299,6 +299,8 @@ def string_repr_of_item(item):
 
 
 def plot_maze(maze, label_items_with_letters = True):
+    # Visualization requires going to CPU
+    maze = maze.cpu()
     maze_width = len(maze[0])
     _, ax = plt.subplots()
     ax.imshow(-maze, 'Greys')
@@ -336,10 +338,8 @@ HARVEST_HUMAN_PENALTY = -11
 def create_reward_tensor_from_maze(maze: Float[Tensor, "maze_width maze_Width"]) -> Float[Tensor, "maze_width maze_width"]:
     rewards = torch.zeros_like(maze)
     # TODO: Finish implementing this
-    # Add exercise section here
     rewards[maze == MAZE_WALL] = HIT_WALL_PENALTY
     rewards[maze == MAZE_EMPTY_SPACE] = MOVE_PENALTY
-    # raise NotImplementedException()
     rewards[maze == HARVESTABLE_CROP] = HARVEST_CROP_REWARD
     rewards[maze == HUMAN] = HARVEST_HUMAN_PENALTY
     rewards[maze == MAZE_FINISH] = WIN_REWARD
@@ -483,9 +483,9 @@ def reshape_maze_and_position_to_input(
     crop_locations = maze == HARVESTABLE_CROP
     human_locations = maze == HUMAN
     return torch.cat((
-        wall_locations.view(-1),
-        crop_locations.view(-1),
-        human_locations.view(-1),
+        wall_locations.to(device).view(-1),
+        crop_locations.to(device).view(-1),
+        human_locations.to(device).view(-1),
         one_hot_encode_position(pos),
     )).float()
 
@@ -500,7 +500,7 @@ test_maze = torch.tensor(
         [ 1.,  0.,  1.,  0.,  1.,  0.,  0.],
         [ 3.,  0.,  1.,  1.,  1.,  1., -1.],
     ]
-)
+).to(device)
 test_position = (2, 1)
 expected_1d_tensor = torch.tensor([0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 1., 1., 1., 0., 0., 0., 0., 1.,
         0., 1., 0., 1., 1., 1., 1., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0.,
@@ -510,7 +510,7 @@ expected_1d_tensor = torch.tensor([0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 1., 1
         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0.,
-        0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0.])
+        0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0.]).to(device)
 
 assert_tensors_within_epsilon(expected=expected_1d_tensor, actual=reshape_maze_and_position_to_input(test_maze, test_position))
 
@@ -551,7 +551,7 @@ class ReplayBuffer:
 
     def shuffle(self):
         """
-        Shuffling the 
+        Shuffling the various state-action+consequence tuples.
         """
         # We assume that all the tensors share the same buffer size, so we just
         # grab the buffer size from states
@@ -561,6 +561,16 @@ class ReplayBuffer:
         self.rewards = self.rewards[permutation]
         self.is_terminals = self.is_terminals[permutation]
         self.next_states = self.next_states[permutation]
+
+    def to(self, device):
+        return ReplayBuffer(
+          self.states.to(device),
+          self.actions.to(device),
+          self.rewards.to(device),
+          self.is_terminals.to(device),
+          self.next_states.to(device),
+        )
+
 
 
 def create_replay_buffer(replay_buffer_size: int) -> ReplayBuffer:
@@ -926,6 +936,7 @@ assert_tensors_within_epsilon(
 # through this and make sure you understand what the loop is doing.
 
 def train(game_agent: GameAgent, replay_buffer: ReplayBuffer):
+    replay_buffer = replay_buffer.to(device)
     target_network = game_agent.target_network.to(device)
     current_network = game_agent.current_network.to(device)
     optimizer = torch.optim.SGD(current_network.parameters(), lr=LEARNING_RATE)
@@ -974,8 +985,8 @@ game_agent = GameAgent(NeuralNetwork(), NeuralNetwork())
 
 # This experiment is very sensitive to initial parameters, so we're going to fix
 # the starting parameters we use
-current_network_state_parameters = torch.load("reinitialized_current_network_state_dict.pt", map_location=device)
-target_network_state_parameters = torch.load("reinitialized_target_network_state_dict.pt", map_location=device)
+current_network_state_parameters = torch.load("reinitialized_current_network_state_dict.pt", map_location=device, weights_only=True)
+target_network_state_parameters = torch.load("reinitialized_target_network_state_dict.pt", map_location=device, weights_only=True)
 
 game_agent.current_network.load_state_dict(current_network_state_parameters)
 game_agent.target_network.load_state_dict(target_network_state_parameters)
@@ -1020,20 +1031,27 @@ example_maze = torch.tensor(
         [ 1.,  0.,  1.,  0.,  1.,  0.,  0.],
         [ 3.,  0.,  1.,  1.,  1.,  1., -1.],
     ]
-)
+).to(device)
 
 # Note that the way to interpret this image is that each arrow indicates which
 # direction the agent would go, if it had been inserted to that point.
 # As you can see, this untrained agent really loves to smash into walls or go
 # out of bounds.
 
-plot_policy(game_agent.current_network, example_maze)
+plot_policy(game_agent.current_network.to(device), example_maze)
 game_agent.current_network(reshape_maze_and_position_to_input(example_maze, (0, 1)))
 
 # %%
 
 # Now actually train the agent!
-train(game_agent, preexisting_replay_buffer)
+
+# If you're willing to wait around a while, you can uncomment this code and
+# generate the training set yourself, otherwise we can rely on our
+# pre-generated replay buffer
+# training_replay_buffer = create_replay_buffer(500_000)
+training_replay_buffer = preexisting_replay_buffer
+
+train(game_agent, training_replay_buffer)
 
 # %%
 

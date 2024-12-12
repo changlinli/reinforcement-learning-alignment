@@ -1045,10 +1045,18 @@ game_agent.current_network(reshape_maze_and_position_to_input(example_maze, (0, 
 
 # Now actually train the agent!
 
-# If you're willing to wait around a while, you can uncomment this code and
-# generate the training set yourself, otherwise we can rely on our
-# pre-generated replay buffer
+# If you're willing to wait around a while (this can take > 10 min depending on
+# your computer), you can uncomment this code and generate the training set
+# yourself. Because it takes so long, we'd recommend just using the
+# pre-generated replay buffer, but we want to leave this option open so that
+# you know there's no tricks we're playing with the pre-generated pickle.
 # training_replay_buffer = create_replay_buffer(500_000)
+#
+# If you'd like, you can start with the pre-generated pickle and then re-run
+# this entire notebook later on (and do make sure to re-run things from the
+# beginning to avoid weird issues with how cells depend on each other) with
+# your own generated replay buffer
+
 training_replay_buffer = preexisting_replay_buffer
 
 train(game_agent, training_replay_buffer)

@@ -456,7 +456,7 @@ def get_next_pos(
 #
 # this would be encoded as single 33 element 1-d vector consisting of
 #
-# 0 1 0 0 1 0 0 0 0     0 0 1 0 0 0 0 0 0    0 0 0 0 0 0 0 0 0    0 1 0      0 0 0
+# 0 1 0 0 1 0 0 0 0     0 0 1 0 0 0 0 0 0    0 0 0 0 0 0 0 0 0    0 1 0      1 0 0
 # ----- ----- -----     ----- ----- -----    ----- ----- -----    -----      -----
 # Row 0 Row 1 Row 2     Row 0 Row 1 Row 2    Row 0 Row 1 Row 2    row coord  col coord
 #

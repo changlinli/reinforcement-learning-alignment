@@ -186,11 +186,11 @@ get a better intuition for what role Bellman's equation plays in Q-learning.
 Once we have this intuition, it is easier to see what role neural nets play.
 
 To make this feasible, we will start with an extremely simple game, even simpler
-than the previous game. We have a board with three cells laid side-by-side. They
-are respectively cells `A`, `B`, and `C`. The agent starts at a random cell at
+than the previous game. We have a board with two cells laid side-by-side. They
+are respectively cells `A` and `B`. The agent starts at a random cell at
 the beginning of the game and can take turns deciding whether to go left or
 right. No matter where you start, the objective of the game is to move to the
-right side of the board, i.e. to get to the right-hand side of cell `C`.
+right side of the board, i.e. to get to the right-hand side of cell `B`.
 
 This results in the following outcomes:
 
@@ -202,27 +202,22 @@ This results in the following outcomes:
 + If the agent is at cell `B`:
     * Going left moves the agent to cell `A` and the agent receives a reward of
       -0.1
-    * Going right moves the agent to cell `C` and the agent receives a reward of
-      -0.1
-+ If the agent is at cell `C`:
-    * Going left moves the agent to cell `B` and the agent receives a reward of
-      -0.1
     * Going right ends the game and the agent receives a reward of 1
 
-Note that most moves (except the final move from cell `C` that ends the game)
+Note that most moves (except the final move from cell `B` that ends the game)
 have a mild negative reward penalty to encourage the agent to find the solution
 with the fewest moves.
 
 An ASCII representation of the board is given below.
 
 ```
--------
-|A|B|C|
--------
+-----
+|A|B|
+-----
 ```
 
 We have two additional rules. There is a discount factor ($\gamma$) of 0.9.
-Also, the game always ends after 5 turns no matter which cell the agent is
+Also, the game always ends after two turns no matter which cell the agent is
 on.
 
 *Exercise*
@@ -232,31 +227,13 @@ on.
 > following this policy (i.e. what is the reward I get for performing one move)?
 > What is $Q_\pi(B, right)$ where $Q_\pi(s, a)$ is the $Q$-value, i.e. total
 > return, if every move performed after action $a$ is done according to the
-> policy $\pi$? What is $Q_\pi(B, left)$? What is $Q_\pi(C, right)$?
-
-<details>
-<summary>Solution</summary>
-The immediate reward at $B$ when following $\pi$ is -0.1 (following $\pi$ means
-we go one step to the left and end up at $A$).
-
-$Q_\pi(B, right) = -0.1 + (-0.1 \cdot 0.9) + (-0.1 \cdot 0.9 ^2) + (-0.1 \cdot 0.9 ^3) + (-0.1 \cdot 0.9 ^4) = -0.40951$, where the agent goes from B to C and then continues to follow its policy of going left and goes back to B and then to A and is stuck there for two more turns before the game hits the five turn maximum and ends.
-
-$Q_\pi(C, right) = 1$, where the agent immediately ends the game by going right.
-
----
-</details>
+> policy $\pi$? What is $Q_\pi(B, left)$? What is $Q_\pi(A, right)$?
 
 *Exercise*
 
 > Based on this description and reward function, what is the optimal policy for
 > an agent to follow? I.e. what strategy should the agent use to maximize the
 > total reward it receives for any given game?
-
-<details>
-<summary>Solution</summary>
-It should just always go to the right. It should never go left.
----
-</details>
 
 We're going to train this agent using Q-learning, but simply using pen and
 paper. As a reminder, a $Q$ function takes in a state and an action and outputs
@@ -270,12 +247,14 @@ whatever you want. The below is one example of such a random initialization (but
 again you can use whatever values you want).
 
 ```
-A, right -> -1
-A, left -> -3
-B, right -> 4
-B, left -> 0
-C, right -> -1
-C, left -> 2
+A, right, turn 0 -> -1
+A, left, turn 0 -> -3
+B, right, turn 0 -> 4
+B, left, turn 0 -> 0
+A, right, turn 1 -> 0.2
+A, left, turn 1 -> -0.1
+B, right, turn 1 -> 1
+B, left, turn 1 -> 2
 ```
 
 *Exercise*:
@@ -288,19 +267,6 @@ C, left -> 2
 >
 > We can then compare what we get after running Q-learning to what we know the
 > optimal $Q$ function should be.
-
-<details>
-<summary>Solution</summary>
-```
-A, right -> 0.62
-A, left -> 0.458
-B, right -> 0.8
-B, left -> 0.458
-C, right -> 1.0
-C, left -> 0.62
-```
----
-</details>
 
 Now use this optimal $Q$ function to determine what the agent's policy should
 be.

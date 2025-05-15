@@ -12,7 +12,14 @@ import matplotlib.pyplot as plt
 
 # %%
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+print(f"{device=}")
 
 # The numerical values of the maze correspond to the following:
 MAZE_WIDTH = 7

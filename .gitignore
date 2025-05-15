@@ -1,3 +1,9 @@
+reinitialized_current_network_state_dict.pt
+reinitialized_target_network_state_dict.pt
+replay_buffer.pickle
+
+.ipynb_checkpoints
+
 .venv
 *.pyc
 .idea

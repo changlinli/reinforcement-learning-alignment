@@ -90,7 +90,14 @@ if not os.path.isfile("reinitialized_target_network_state_dict.pt"):
 
 # %%
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+print(f"{device=}")
 
 # So the game the agent is going to learn is maze navigation with item
 # collection along the way. The agent can either harvest crops or harvest

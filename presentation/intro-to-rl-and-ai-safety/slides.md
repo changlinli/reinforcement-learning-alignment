@@ -146,7 +146,7 @@ Let's take chess as an example.
     * Then use it to calculate $max_{i} Q(s_{a}, a_i)$
     * We know $R(s, a)$
     * Difference between $Q(s, a)$ and $R(s, a) + max_{i} Q(s_{a}, a_i)$ is our loss
-      function
+      function (since we know they must be equal by Bellman's equation)
 + We therefore end up with a bunch of training examples analogous to image
   classification
     * Image classification: actual answer and correct answer, loss is diff
